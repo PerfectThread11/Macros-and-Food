@@ -1,0 +1,14 @@
+{
+  "name": "Macros & Food",
+  "short_name": "Macros",
+  "description": "Track what you eat, your macros, and what to buy each week.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f2f7",
+  "theme_color": "#2eb872",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
