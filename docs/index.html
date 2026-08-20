@@ -157,6 +157,48 @@
     background: none; border: none; color: var(--accent); font-family: inherit;
     font-size: 15px; font-weight: 600; cursor: pointer; padding: 0 0 10px;
   }
+  .water-btns { display: flex; gap: 8px; margin-top: 8px; }
+  .water-btns button { flex: 1; padding: 10px 4px; }
+  .exp {
+    font-family: inherit; font-size: 11px; font-weight: 700; border: none;
+    border-radius: 6px; padding: 3px 7px; cursor: pointer; flex-shrink: 0;
+  }
+  .exp.ok { background: var(--bg); color: var(--muted); }
+  .exp.soon { background: #fff3e0; color: var(--warn); }
+  .exp.bad { background: #ffe5e3; color: var(--danger); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .exp.soon { background: #3a2a12; }
+    :root:not([data-theme="light"]) .exp.bad { background: #3a1512; }
+  }
+  :root[data-theme="dark"] .exp.soon { background: #3a2a12; }
+  :root[data-theme="dark"] .exp.bad { background: #3a1512; }
+  .slot { margin: 8px 0 2px; }
+  .slot .slotname {
+    font-size: 11px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; background: var(--bg);
+    border-radius: 8px; padding: 6px 8px; font-size: 13px; margin: 3px 6px 3px 0;
+  }
+  .chip button {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-family: inherit; font-size: 13px; padding: 0 2px;
+  }
+  .addslot {
+    background: none; border: 1px dashed var(--line); color: var(--muted);
+    border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 600;
+    cursor: pointer; font-family: inherit; margin: 3px 0;
+  }
+  svg.chart { width: 100%; height: auto; display: block; }
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+    background: var(--text); color: var(--card); padding: 9px 18px;
+    border-radius: 999px; font-size: 13px; font-weight: 600;
+    opacity: 0; transition: opacity 0.25s; pointer-events: none; z-index: 60;
+  }
+  #toast.show { opacity: 1; }
   .statgrid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .stat { background: var(--bg); border-radius: 10px; padding: 10px; text-align: center; }
   .stat .v { font-size: 17px; font-weight: 800; }
@@ -170,6 +212,7 @@
   <nav id="tabbar"></nav>
 </div>
 <div id="modal-root"><div id="modal"></div></div>
+<div id="toast"></div>
 
 <script>
 "use strict";
@@ -199,10 +242,24 @@ function defaultState() {
   return {
     foods: seedFoods(),
     log: [],       // {id, date:'YYYY-MM-DD', name, servings, m:{per serving}}
-    pantry: [],    // {id, name, qty, enough}
+    pantry: [],    // {id, name, qty, enough, exp:'YYYY-MM-DD'|''}
     orders: [],    // {id, name, createdAt, items:[{id, name, qty, purchased, skip}]}
-    goals: { cal: 2000, p: 100, c: 250, f: 70 }
+    water: {},     // date -> ounces
+    recipes: [],   // {id, name, servings, ingredients:[{id, foodId|null, name, servings}]}
+    plan: {},      // date -> {b:[], l:[], d:[], s:[]} of {id, kind:'recipe'|'food', refId, name, servings}
+    body: [],      // {id, date, weight}
+    goals: { cal: 2000, p: 100, c: 250, f: 70, water: 64 }
   };
+}
+
+// Fill in fields added after a user's data was first saved.
+function migrate(s) {
+  s.water = s.water || {};
+  s.recipes = s.recipes || [];
+  s.plan = s.plan || {};
+  s.body = s.body || [];
+  if (s.goals.water == null) s.goals.water = 64;
+  return s;
 }
 
 function loadState() {
@@ -210,7 +267,7 @@ function loadState() {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s && Array.isArray(s.foods)) return s;
+      if (s && Array.isArray(s.foods)) return migrate(s);
     }
   } catch (e) { /* storage unavailable: fall through to memory */ }
   return memoryFallback || (memoryFallback = defaultState());
@@ -286,18 +343,37 @@ const ui = {
   logDate: todayStr(),
   statsPeriod: "week",
   statsOffset: 0,
+  statsSeg: "nutrition",
+  planOffset: 0,
   orderId: null,
   foodSearch: "",
-  am: null // add-entry modal state
+  foodsSeg: "foods",
+  am: null, // add-entry modal state
+  re: null, // recipe editor modal state
+  pm: null  // plan-meal modal state
 };
 
 const TABS = [
   { id: "log", label: "Log", icon: "🍽️", title: "Food Log" },
-  { id: "stats", label: "Stats", icon: "📊", title: "Stats" },
+  { id: "plan", label: "Plan", icon: "📅", title: "Meal Plan" },
   { id: "foods", label: "Foods", icon: "🥕", title: "My Foods" },
   { id: "shopping", label: "Shopping", icon: "🛒", title: "Shopping Orders" },
-  { id: "pantry", label: "Pantry", icon: "🧺", title: "Pantry" }
+  { id: "pantry", label: "Pantry", icon: "🧺", title: "Pantry" },
+  { id: "stats", label: "Stats", icon: "📊", title: "Stats" }
 ];
+
+const SLOTS = [["b", "Breakfast"], ["l", "Lunch"], ["d", "Dinner"], ["s", "Snacks"]];
+
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
+}
+
+function prettyShort(s) { const d = fromDateStr(s); return MONTHS[d.getMonth()] + " " + d.getDate(); }
 
 /* ---------- rendering ---------- */
 
@@ -313,6 +389,7 @@ function render() {
 
   const c = document.getElementById("content");
   if (ui.tab === "log") c.innerHTML = renderLog();
+  else if (ui.tab === "plan") c.innerHTML = renderPlan();
   else if (ui.tab === "stats") c.innerHTML = renderStats();
   else if (ui.tab === "foods") c.innerHTML = renderFoods();
   else if (ui.tab === "shopping") c.innerHTML = ui.orderId ? renderOrder() : renderOrders();
@@ -358,6 +435,15 @@ function renderLog() {
     goalBar("Fat", t.f, g.f, "g", "fat") +
     '<div class="row small muted" style="justify-content:space-between">' +
     "<span>Fiber " + neat(t.fib) + "g</span><span>Sugar " + neat(t.sug) + "g</span></div></div>";
+
+  const oz = state.water[ui.logDate] || 0;
+  html += '<div class="card"><h2>Water</h2>' +
+    goalBar("Water", oz, g.water || 0, "oz", "carbs") +
+    '<div class="water-btns">' +
+    '<button class="btn" data-action="water-add" data-id="8">＋8 oz</button>' +
+    '<button class="btn" data-action="water-add" data-id="12">＋12 oz</button>' +
+    '<button class="btn" data-action="water-add" data-id="16">＋16 oz</button>' +
+    '<button class="btn" data-action="water-add" data-id="-8">−8</button></div></div>';
 
   html += '<div class="card"><h2>Eaten</h2>';
   if (entries.length === 0) {
@@ -407,6 +493,14 @@ function periodLabel(iv) {
 }
 
 function renderStats() {
+  let html = '<div class="seg">' +
+    '<button data-action="stats-seg" data-id="nutrition" class="' + (ui.statsSeg === "nutrition" ? "active" : "") + '">Nutrition</button>' +
+    '<button data-action="stats-seg" data-id="body" class="' + (ui.statsSeg === "body" ? "active" : "") + '">Body</button></div>';
+  if (ui.statsSeg === "body") return html + renderBody();
+  return html + renderNutritionStats();
+}
+
+function renderNutritionStats() {
   const iv = periodInterval();
   const startS = toDateStr(iv.start), endS = toDateStr(iv.end);
   const entries = state.log.filter(en => en.date >= startS && en.date < endS);
@@ -443,6 +537,14 @@ function renderStats() {
   }
   html += "</div>";
 
+  const wDays = Object.keys(state.water).filter(d => d >= startS && d < endS && state.water[d] > 0);
+  const wTotal = wDays.reduce((n, d) => n + state.water[d], 0);
+  html += '<div class="card"><h2>Water · ' + wDays.length + " logged day" + (wDays.length === 1 ? "" : "s") + "</h2>";
+  if (!wDays.length) html += '<div class="empty">No water logged in this period.</div>';
+  else html += goalBar("Daily average", wTotal / wDays.length, g.water || 0, "oz/day", "carbs") +
+    '<div class="small muted">' + whole(wTotal) + " oz total</div>";
+  html += "</div>";
+
   if (ui.statsPeriod === "week") {
     let dayRows = "";
     let maxCal = 1;
@@ -472,6 +574,52 @@ function renderStats() {
 
 function stat(v, l) { return '<div class="stat"><div class="v">' + v + '</div><div class="l">' + l + "</div></div>"; }
 
+/* ----- body (weight) tracking ----- */
+
+function weightChart(entries) {
+  const pts = entries.slice(-60);
+  const ws = pts.map(p => p.weight);
+  let min = Math.min.apply(null, ws), max = Math.max.apply(null, ws);
+  if (max - min < 2) { max += 1; min -= 1; }
+  const W = 340, H = 140, L = 38, R = 12, T = 12, B = 8;
+  const x = i => L + (pts.length === 1 ? 0 : i * (W - L - R) / (pts.length - 1));
+  const y = w => T + (max - w) * (H - T - B) / (max - min);
+  const line = pts.map((p, i) => x(i).toFixed(1) + "," + y(p.weight).toFixed(1)).join(" ");
+  const grid = [min, (min + max) / 2, max].map(v =>
+    '<line x1="' + L + '" y1="' + y(v).toFixed(1) + '" x2="' + (W - R) + '" y2="' + y(v).toFixed(1) + '" stroke="var(--line)" stroke-width="1"/>' +
+    '<text x="' + (L - 5) + '" y="' + (y(v) + 3).toFixed(1) + '" text-anchor="end" font-size="9" fill="var(--muted)">' + neat(v) + "</text>").join("");
+  const last = pts[pts.length - 1];
+  return '<svg class="chart" viewBox="0 0 340 140">' + grid +
+    '<polyline points="' + line + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+    '<circle cx="' + x(pts.length - 1).toFixed(1) + '" cy="' + y(last.weight).toFixed(1) + '" r="3.5" fill="var(--accent)"/></svg>' +
+    '<div class="small muted" style="text-align:right;margin-top:4px">' + prettyShort(pts[0].date) + " – " + prettyShort(last.date) + "</div>";
+}
+
+function renderBody() {
+  const entries = state.body.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  let html = '<div class="card"><h2>Log weight</h2><div class="row">' +
+    '<input type="number" id="bd-weight" inputmode="decimal" step="0.1" min="0" placeholder="Weight (lb)" class="grow">' +
+    '<input type="date" id="bd-date" value="' + todayStr() + '" style="width:150px">' +
+    '<button class="btn primary" data-action="bd-add">Add</button></div>' +
+    '<div class="empty" style="padding-bottom:0">Logging twice on the same day updates that day’s entry.</div></div>';
+
+  if (entries.length >= 2) html += '<div class="card"><h2>Trend</h2>' + weightChart(entries) + "</div>";
+
+  if (!entries.length) {
+    html += '<div class="card"><div class="empty">Log your weight whenever you weigh in — a trend chart appears once you have two entries.</div></div>';
+  } else {
+    const first = entries[0], latest = entries[entries.length - 1];
+    const diff = latest.weight - first.weight;
+    html += '<div class="card"><h2>Entries</h2>' +
+      '<div class="small muted" style="margin-bottom:6px">Current ' + neat(latest.weight) + " lb · " +
+      (diff === 0 ? "no change" : (diff > 0 ? "+" : "−") + neat(Math.abs(diff)) + " lb") + " since " + prettyShort(first.date) + "</div>" +
+      entries.slice().reverse().map(en =>
+        '<div class="listitem"><div class="grow"><b>' + neat(en.weight) + ' lb</b> <span class="small muted">' + prettyShort(en.date) + "</span></div>" +
+        '<button class="icon-btn" data-action="bd-del" data-id="' + en.id + '">✕</button></div>').join("") + "</div>";
+  }
+  return html;
+}
+
 /* ----- Foods tab ----- */
 
 function foodsFiltered() {
@@ -492,10 +640,99 @@ function foodListHTML() {
 }
 
 function renderFoods() {
-  return '<div class="card">' +
+  const seg = '<div class="seg">' +
+    '<button data-action="foods-seg" data-id="foods" class="' + (ui.foodsSeg === "foods" ? "active" : "") + '">My Foods</button>' +
+    '<button data-action="foods-seg" data-id="recipes" class="' + (ui.foodsSeg === "recipes" ? "active" : "") + '">Recipes</button></div>';
+  if (ui.foodsSeg === "recipes") {
+    return '<div class="card">' + seg + recipeListHTML() +
+      '<button class="btn primary full" data-action="new-recipe">＋ New recipe</button></div>';
+  }
+  return '<div class="card">' + seg +
     '<input type="search" id="food-search" placeholder="Search foods" value="' + esc(ui.foodSearch) + '">' +
     '<div id="food-list" style="margin-top:6px">' + foodListHTML() + "</div>" +
     '<button class="btn primary full" data-action="new-food">＋ New food</button></div>';
+}
+
+/* ----- recipes ----- */
+
+function recipePerServing(r) {
+  let total = Object.assign({}, ZERO);
+  r.ingredients.forEach(ing => {
+    const f = ing.foodId && state.foods.find(x => x.id === ing.foodId);
+    if (f) total = addM(total, scaleM(f.m, ing.servings));
+  });
+  return scaleM(total, 1 / Math.max(r.servings, 0.5));
+}
+
+function recipeListHTML() {
+  const rs = state.recipes.slice().sort((a, b) => a.name.localeCompare(b.name));
+  if (!rs.length) return '<div class="empty">Build recipes from your foods — macros per serving are calculated automatically, and the meal planner can turn a week of recipes into a shopping list.</div>';
+  return rs.map(r => {
+    const per = recipePerServing(r);
+    return '<div class="listitem"><div class="grow" data-action="edit-recipe" data-id="' + r.id + '" style="cursor:pointer">' +
+      "<div><b>" + esc(r.name) + '</b> <span class="small muted">makes ' + neat(r.servings) + "</span></div>" +
+      '<div class="small muted">per serving: ' + whole(per.cal) + " cal · P " + neat(per.p) + "g · C " + neat(per.c) + "g · F " + neat(per.f) + "g</div></div>" +
+      '<button class="icon-btn" data-action="del-recipe" data-id="' + r.id + '">✕</button></div>';
+  }).join("");
+}
+
+function rePickListHTML() {
+  const q = (ui.re.search || "").trim().toLowerCase();
+  let foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
+  if (q) foods = foods.filter(f => f.name.toLowerCase().includes(q));
+  let html = foods.map(f =>
+    '<button class="foodpick" data-action="re-pick-food" data-id="' + f.id + '"><span><b>' + esc(f.name) +
+    '</b><br><span class="small muted">' + esc(f.serving) + "</span></span></button>").join("");
+  if (q) html += '<button class="foodpick" data-action="re-pick-custom"><span>＋ Add “' + esc(ui.re.search.trim()) + "” without macros<br>" +
+    '<span class="small muted">shows on shopping lists, adds no calories</span></span></button>';
+  if (!html) html = '<div class="empty">Search your foods, or type a name (like “salt”) to add it as a plain item.</div>';
+  return html;
+}
+
+function reModalHTML() {
+  if (ui.re.picking) {
+    return modalHead("Add Ingredient") +
+      '<input type="search" id="re-search" placeholder="Search your foods" value="' + esc(ui.re.search || "") + '">' +
+      '<div id="re-pick-list" style="max-height:44dvh;overflow-y:auto;margin-top:6px">' + rePickListHTML() + "</div>" +
+      '<button class="btn full" data-action="re-pick-cancel">Back to recipe</button>';
+  }
+  const per = recipePerServing({ servings: ui.re.servings || 1, ingredients: ui.re.ingredients });
+  return modalHead(ui.re.id ? "Edit Recipe" : "New Recipe") +
+    '<div class="field"><label>Recipe name</label><input type="text" id="re-name" value="' + esc(ui.re.name) + '"></div>' +
+    '<div class="field"><label>Servings it makes</label><input type="number" id="re-servings" inputmode="decimal" step="0.5" min="0.5" value="' + ui.re.servings + '"></div>' +
+    '<h2 style="font-size:13px;font-weight:700;color:var(--muted);margin:10px 0 4px">INGREDIENTS</h2>' +
+    (ui.re.ingredients.length ? ui.re.ingredients.map((ing, i) =>
+      '<div class="listitem"><div class="grow"><b>' + esc(ing.name) + "</b>" +
+      (ing.foodId ? "" : ' <span class="small muted">no macros</span>') + "</div>" +
+      '<input type="number" id="re-ing-' + i + '" inputmode="decimal" step="0.25" min="0" value="' + ing.servings + '" style="width:76px">' +
+      '<span class="small muted">srv</span>' +
+      '<button class="icon-btn" data-action="re-del-ing" data-id="' + i + '">✕</button></div>').join("")
+    : '<div class="empty">No ingredients yet.</div>') +
+    '<button class="btn full" data-action="re-open-pick">＋ Add ingredient</button>' +
+    '<div class="small muted" style="margin-top:10px">Per serving: ' + whole(per.cal) + " cal · P " + neat(per.p) + "g · C " + neat(per.c) + "g · F " + neat(per.f) + "g</div>" +
+    '<button class="btn primary full" data-action="re-save">Save recipe</button>';
+}
+
+function refreshReModal() {
+  openModal(reModalHTML());
+  const q = document.getElementById("re-search");
+  if (q) q.addEventListener("input", () => {
+    ui.re.search = q.value;
+    const list = document.getElementById("re-pick-list");
+    if (list) list.innerHTML = rePickListHTML();
+  });
+}
+
+function snapshotReInputs() {
+  if (!ui.re || ui.re.picking) return;
+  const n = document.getElementById("re-name");
+  if (n) ui.re.name = n.value;
+  const s = document.getElementById("re-servings");
+  if (s) { const v = parseFloat(s.value); if (isFinite(v) && v > 0) ui.re.servings = v; }
+  ui.re.ingredients.forEach((ing, i) => {
+    const el = document.getElementById("re-ing-" + i);
+    if (el) { const v = parseFloat(el.value); if (isFinite(v) && v >= 0) ing.servings = v; }
+  });
 }
 
 /* ----- Shopping tab ----- */
@@ -574,27 +811,158 @@ function renderOrder() {
   return html;
 }
 
+/* ----- Plan tab ----- */
+
+function planWeekDates() {
+  const t = new Date();
+  t.setDate(t.getDate() - t.getDay() + ui.planOffset * 7);
+  const out = [];
+  for (let i = 0; i < 7; i++) out.push(toDateStr(new Date(t.getFullYear(), t.getMonth(), t.getDate() + i)));
+  return out;
+}
+
+function planDay(ds) { return state.plan[ds] || { b: [], l: [], d: [], s: [] }; }
+
+function planEntryLabel(en) {
+  if (en.kind === "recipe") {
+    const r = state.recipes.find(x => x.id === en.refId);
+    return r ? r.name : en.name;
+  }
+  const f = state.foods.find(x => x.id === en.refId);
+  return f ? f.name : en.name;
+}
+
+function renderPlan() {
+  const dates = planWeekDates();
+  const first = fromDateStr(dates[0]), last = fromDateStr(dates[6]);
+  let html = '<div class="card"><div class="navline">' +
+    '<button class="icon-btn" data-action="plan-prev">‹</button>' +
+    '<div class="title">' + MONTHS[first.getMonth()] + " " + first.getDate() + " – " + MONTHS[last.getMonth()] + " " + last.getDate() + "</div>" +
+    '<button class="icon-btn" data-action="plan-next">›</button></div>' +
+    '<button class="btn primary full" style="margin-top:0" data-action="gen-shopping">🛒 Turn this week’s plan into a shopping list</button>' +
+    '<div class="empty" style="padding-bottom:0">Plan meals from your recipes and foods. The 🍽️ button on a planned meal adds it to that day’s food log.</div></div>';
+
+  html += dates.map(ds => {
+    const day = planDay(ds);
+    const d = fromDateStr(ds);
+    const isToday = ds === todayStr();
+    return '<div class="card"><h2' + (isToday ? ' style="color:var(--accent)"' : "") + ">" +
+      WDAYS[d.getDay()] + " · " + MONTHS[d.getMonth()] + " " + d.getDate() + (isToday ? " · today" : "") + "</h2>" +
+      SLOTS.map(sl =>
+        '<div class="slot"><div class="slotname">' + sl[1] + "</div>" +
+        day[sl[0]].map(en =>
+          '<span class="chip">' + esc(planEntryLabel(en)) + (en.servings !== 1 ? " ×" + neat(en.servings) : "") +
+          '<button data-action="plan-log" data-id="' + ds + "|" + sl[0] + "|" + en.id + '" title="Add to food log">🍽️</button>' +
+          '<button data-action="plan-del" data-id="' + ds + "|" + sl[0] + "|" + en.id + '">✕</button></span>').join("") +
+        '<button class="addslot" data-action="plan-add" data-id="' + ds + "|" + sl[0] + '">＋ add</button></div>').join("") +
+      "</div>";
+  }).join("");
+  return html;
+}
+
+function pmListHTML() {
+  const q = (ui.pm.search || "").trim().toLowerCase();
+  if (ui.pm.mode === "recipe") {
+    let rs = state.recipes.slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (q) rs = rs.filter(r => r.name.toLowerCase().includes(q));
+    if (!rs.length) return '<div class="empty">No recipes' + (q ? " match" : " yet — build one on the Foods tab") + ".</div>";
+    return rs.map(r =>
+      '<button class="foodpick" data-action="pm-pick" data-id="' + r.id + '"><span><b>' + esc(r.name) +
+      '</b><br><span class="small muted">' + whole(recipePerServing(r).cal) + " cal/serving</span></span>" +
+      (ui.pm.refId === r.id ? '<span class="tick">✓</span>' : "") + "</button>").join("");
+  }
+  let foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
+  if (q) foods = foods.filter(f => f.name.toLowerCase().includes(q));
+  if (!foods.length) return '<div class="empty">No foods match.</div>';
+  return foods.map(f =>
+    '<button class="foodpick" data-action="pm-pick" data-id="' + f.id + '"><span><b>' + esc(f.name) +
+    '</b><br><span class="small muted">' + esc(f.serving) + "</span></span>" +
+    (ui.pm.refId === f.id ? '<span class="tick">✓</span>' : "") + "</button>").join("");
+}
+
+function pmModalHTML() {
+  const slotName = SLOTS.find(sl => sl[0] === ui.pm.slot)[1];
+  return modalHead(slotName + " · " + prettyShort(ui.pm.ds)) +
+    '<div class="seg">' +
+    '<button data-action="pm-mode" data-id="recipe" class="' + (ui.pm.mode === "recipe" ? "active" : "") + '">Recipes</button>' +
+    '<button data-action="pm-mode" data-id="food" class="' + (ui.pm.mode === "food" ? "active" : "") + '">My Foods</button></div>' +
+    '<input type="search" id="pm-search" placeholder="Search" value="' + esc(ui.pm.search || "") + '">' +
+    '<div id="pm-list" style="max-height:34dvh;overflow-y:auto;margin-top:6px">' + pmListHTML() + "</div>" +
+    '<div class="field" style="margin-top:12px"><label>Servings</label>' +
+    '<input type="number" id="pm-servings" inputmode="decimal" step="0.25" min="0.25" value="' + (ui.pm.servings || 1) + '"></div>' +
+    '<button class="btn primary full" data-action="pm-save">Add to plan</button>';
+}
+
+function refreshPmModal() {
+  openModal(pmModalHTML());
+  const q = document.getElementById("pm-search");
+  if (q) q.addEventListener("input", () => {
+    ui.pm.search = q.value;
+    const list = document.getElementById("pm-list");
+    if (list) list.innerHTML = pmListHTML();
+  });
+}
+
+function snapshotPm() {
+  if (!ui.pm) return;
+  const s = document.getElementById("pm-servings");
+  if (s) { const v = parseFloat(s.value); if (isFinite(v) && v > 0) ui.pm.servings = v; }
+  const q = document.getElementById("pm-search");
+  if (q) ui.pm.search = q.value;
+}
+
 /* ----- Pantry tab ----- */
+
+function expInfo(p) {
+  if (!p.exp) return null;
+  const days = Math.round((fromDateStr(p.exp) - fromDateStr(todayStr())) / 86400000);
+  if (days < 0) return { cls: "bad", label: "Expired " + prettyShort(p.exp), days };
+  if (days === 0) return { cls: "soon", label: "Expires today", days };
+  if (days <= 3) return { cls: "soon", label: "Expires in " + days + "d", days };
+  return { cls: "ok", label: "Exp " + prettyShort(p.exp), days };
+}
+
+function expModalHTML(p) {
+  return modalHead("Expiration") +
+    '<div class="empty" style="padding-top:0">' + esc(p.name) + " — you’ll get a warning when it’s within 3 days of expiring.</div>" +
+    '<input type="hidden" id="pe-id" value="' + p.id + '">' +
+    '<div class="field"><label>Expiration date</label><input type="date" id="pe-date" value="' + (p.exp || "") + '"></div>' +
+    '<button class="btn primary full" data-action="pe-save">Save</button>' +
+    (p.exp ? '<button class="btn full" data-action="pe-clear">Remove date</button>' : "");
+}
 
 function renderPantry() {
   const low = state.pantry.filter(p => !p.enough);
   const stocked = state.pantry.filter(p => p.enough);
 
   function rows(items) {
-    return items.map(p =>
-      '<div class="listitem"><div class="grow"><div><b>' + esc(p.name) + "</b>" +
-      (p.qty ? ' <span class="small muted">' + esc(p.qty) + "</span>" : "") + "</div></div>" +
-      '<button class="pill ' + (p.enough ? "enough" : "low") + '" data-action="toggle-pantry" data-id="' + p.id + '">' +
-      (p.enough ? "✓ Enough" : "⚠︎ Low") + "</button>" +
-      '<button class="icon-btn" data-action="del-pantry" data-id="' + p.id + '">✕</button></div>'
-    ).join("");
+    return items.map(p => {
+      const ei = expInfo(p);
+      return '<div class="listitem"><div class="grow"><div><b>' + esc(p.name) + "</b>" +
+        (p.qty ? ' <span class="small muted">' + esc(p.qty) + "</span>" : "") + "</div></div>" +
+        '<button class="exp ' + (ei ? ei.cls : "ok") + '" data-action="edit-exp" data-id="' + p.id + '">' + (ei ? ei.label : "📅") + "</button>" +
+        '<button class="pill ' + (p.enough ? "enough" : "low") + '" data-action="toggle-pantry" data-id="' + p.id + '">' +
+        (p.enough ? "✓ Enough" : "⚠︎ Low") + "</button>" +
+        '<button class="icon-btn" data-action="del-pantry" data-id="' + p.id + '">✕</button></div>';
+    }).join("");
   }
 
   let html = '<div class="card">' +
-    '<div class="empty" style="padding-top:0">Foods you have at home. Anything marked “Enough” is skipped automatically when it shows up on a shopping order.</div>' +
+    '<div class="empty" style="padding-top:0">Foods you have at home. Anything marked “Enough” is skipped automatically when it shows up on a shopping order. Tap 📅 on an item to set an expiration date.</div>' +
     '<div class="row"><input type="text" id="pantry-name" placeholder="Add food you bought" class="grow">' +
     '<input type="text" id="pantry-qty" placeholder="Qty" style="width:76px">' +
-    '<button class="btn primary" data-action="add-pantry">Add</button></div></div>';
+    '<button class="btn primary" data-action="add-pantry">Add</button></div>' +
+    '<div class="row" style="margin-top:8px"><label class="small muted" for="pantry-exp" style="flex-shrink:0">Expires (optional)</label>' +
+    '<input type="date" id="pantry-exp"></div></div>';
+
+  const expiring = state.pantry.map(p => ({ p, ei: expInfo(p) })).filter(x => x.ei && x.ei.days <= 3)
+    .sort((a, b) => a.ei.days - b.ei.days);
+  if (expiring.length) {
+    html += '<div class="card"><h2 style="color:var(--danger)">⚠️ Use soon or toss</h2>' +
+      expiring.map(x =>
+        '<div class="listitem"><div class="grow"><b>' + esc(x.p.name) + "</b></div>" +
+        '<button class="exp ' + x.ei.cls + '" data-action="edit-exp" data-id="' + x.p.id + '">' + x.ei.label + "</button></div>").join("") + "</div>";
+  }
 
   if (low.length) html += '<div class="card"><h2>Running low — need to buy</h2>' + rows(low) + "</div>";
   if (stocked.length) html += '<div class="card"><h2>Stocked — no need to buy</h2>' + rows(stocked) + "</div>";
@@ -610,7 +978,7 @@ function openModal(html) {
 }
 function closeModal() {
   document.getElementById("modal-root").classList.remove("open");
-  ui.am = null;
+  ui.am = ui.re = ui.pm = null;
 }
 document.getElementById("modal-root").addEventListener("click", e => {
   if (e.target === document.getElementById("modal-root")) closeModal();
@@ -623,8 +991,19 @@ function modalHead(title) {
 
 /* ----- add entry modal ----- */
 
-function amFoodListHTML() {
+function amPickListHTML() {
   const q = (ui.am.search || "").trim().toLowerCase();
+  if (ui.am.mode === "recipe") {
+    let rs = state.recipes.slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (q) rs = rs.filter(r => r.name.toLowerCase().includes(q));
+    if (!rs.length) return '<div class="empty">No recipes' + (q ? " match" : " yet — build one on the Foods tab") + ".</div>";
+    return rs.map(r => {
+      const per = recipePerServing(r);
+      return '<button class="foodpick" data-action="am-pick-rec" data-id="' + r.id + '">' +
+        "<span><b>" + esc(r.name) + '</b><br><span class="small muted">' + whole(per.cal) + " cal · P " + neat(per.p) + "g per serving</span></span>" +
+        (ui.am.recipeId === r.id ? '<span class="tick">✓</span>' : "") + "</button>";
+    }).join("");
+  }
   let foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
   if (q) foods = foods.filter(f => f.name.toLowerCase().includes(q));
   if (!foods.length) return '<div class="empty">No foods match.</div>';
@@ -636,15 +1015,16 @@ function amFoodListHTML() {
 }
 
 function addEntryModalHTML() {
-  const lib = ui.am.mode === "lib";
+  const mode = ui.am.mode;
   let html = modalHead("Add to Log") +
     '<div class="seg">' +
-    '<button data-action="am-mode" data-id="lib" class="' + (lib ? "active" : "") + '">My Foods</button>' +
-    '<button data-action="am-mode" data-id="quick" class="' + (lib ? "" : "active") + '">Quick Add</button></div>';
+    '<button data-action="am-mode" data-id="lib" class="' + (mode === "lib" ? "active" : "") + '">My Foods</button>' +
+    '<button data-action="am-mode" data-id="recipe" class="' + (mode === "recipe" ? "active" : "") + '">Recipes</button>' +
+    '<button data-action="am-mode" data-id="quick" class="' + (mode === "quick" ? "active" : "") + '">Quick Add</button></div>';
 
-  if (lib) {
-    html += '<input type="search" id="am-search" placeholder="Search foods" value="' + esc(ui.am.search || "") + '">' +
-      '<div id="am-food-list" style="max-height:38dvh;overflow-y:auto;margin-top:6px">' + amFoodListHTML() + "</div>";
+  if (mode !== "quick") {
+    html += '<input type="search" id="am-search" placeholder="Search" value="' + esc(ui.am.search || "") + '">' +
+      '<div id="am-pick-list" style="max-height:38dvh;overflow-y:auto;margin-top:6px">' + amPickListHTML() + "</div>";
   } else {
     html += '<div class="field"><label>What did you eat?</label>' +
       '<input type="text" id="am-name" placeholder="e.g. Turkey sandwich" value="' + esc(ui.am.qname || "") + '"></div>' +
@@ -688,8 +1068,8 @@ function refreshAddEntryModal() {
   const q = document.getElementById("am-search");
   if (q) q.addEventListener("input", () => {
     ui.am.search = q.value;
-    const list = document.getElementById("am-food-list");
-    if (list) list.innerHTML = amFoodListHTML();
+    const list = document.getElementById("am-pick-list");
+    if (list) list.innerHTML = amPickListHTML();
   });
 }
 
@@ -714,7 +1094,8 @@ function goalsModalHTML() {
     '<div class="field"><label>Calories</label><input type="number" id="g-cal" inputmode="numeric" min="0" value="' + g.cal + '"></div>' +
     '<div class="field"><label>Protein (g)</label><input type="number" id="g-p" inputmode="numeric" min="0" value="' + g.p + '"></div>' +
     '<div class="field"><label>Carbs (g)</label><input type="number" id="g-c" inputmode="numeric" min="0" value="' + g.c + '"></div>' +
-    '<div class="field"><label>Fat (g)</label><input type="number" id="g-f" inputmode="numeric" min="0" value="' + g.f + '"></div></div>' +
+    '<div class="field"><label>Fat (g)</label><input type="number" id="g-f" inputmode="numeric" min="0" value="' + g.f + '"></div>' +
+    '<div class="field"><label>Water (oz)</label><input type="number" id="g-water" inputmode="numeric" min="0" value="' + (g.water || 0) + '"></div></div>' +
     '<div class="empty">These targets drive the progress bars on the Log tab and the averages in Stats.</div>' +
     '<button class="btn primary full" data-action="g-save">Save goals</button>';
 }
@@ -746,7 +1127,7 @@ function handleImport() {
     try {
       const s = JSON.parse(reader.result);
       if (!s || !Array.isArray(s.foods) || !Array.isArray(s.log)) throw new Error("bad");
-      state = s;
+      state = migrate(s);
       save();
       alert("Backup imported.");
     } catch (e) {
@@ -769,6 +1150,7 @@ const actions = {
   "open-add-entry": () => { ui.am = { mode: "lib", search: "", foodId: null, servings: 1 }; refreshAddEntryModal(); },
   "am-mode": id => { snapshotAmInputs(); ui.am.mode = id; refreshAddEntryModal(); },
   "am-pick": id => { snapshotAmInputs(); ui.am.foodId = (ui.am.foodId === id ? null : id); refreshAddEntryModal(); },
+  "am-pick-rec": id => { snapshotAmInputs(); ui.am.recipeId = (ui.am.recipeId === id ? null : id); refreshAddEntryModal(); },
   "am-save": () => {
     snapshotAmInputs();
     const servings = ui.am.servings || 1;
@@ -776,12 +1158,22 @@ const actions = {
       const f = state.foods.find(x => x.id === ui.am.foodId);
       if (!f) { alert("Pick a food first (or use Quick Add)."); return; }
       state.log.push({ id: uuid(), date: ui.logDate, name: f.name, servings, m: Object.assign({}, f.m) });
+    } else if (ui.am.mode === "recipe") {
+      const r = state.recipes.find(x => x.id === ui.am.recipeId);
+      if (!r) { alert("Pick a recipe first."); return; }
+      state.log.push({ id: uuid(), date: ui.logDate, name: r.name, servings, m: recipePerServing(r) });
     } else {
       const name = (ui.am.qname || "").trim();
       if (!name) { alert("Give it a name first."); return; }
       state.log.push({ id: uuid(), date: ui.logDate, name, servings, m: ui.am.qm || Object.assign({}, ZERO) });
     }
     closeModal(); save();
+  },
+  "water-add": id => {
+    const delta = parseFloat(id);
+    const next = Math.max(0, (state.water[ui.logDate] || 0) + (isFinite(delta) ? delta : 0));
+    if (next > 0) state.water[ui.logDate] = next; else delete state.water[ui.logDate];
+    save();
   },
 
   /* stats */
@@ -790,9 +1182,20 @@ const actions = {
   "stats-next": () => { if (ui.statsOffset < 0) { ui.statsOffset += 1; render(); } },
   "open-goals": () => openModal(goalsModalHTML()),
   "g-save": () => {
-    state.goals = { cal: readNum("g-cal"), p: readNum("g-p"), c: readNum("g-c"), f: readNum("g-f") };
+    state.goals = { cal: readNum("g-cal"), p: readNum("g-p"), c: readNum("g-c"), f: readNum("g-f"), water: readNum("g-water") };
     closeModal(); save();
   },
+  "stats-seg": id => { ui.statsSeg = id; render(); },
+  "bd-add": () => {
+    const w = readNum("bd-weight");
+    if (!w) { alert("Enter your weight first."); return; }
+    const el = document.getElementById("bd-date");
+    const date = (el && el.value) || todayStr();
+    const existing = state.body.find(b => b.date === date);
+    if (existing) existing.weight = w; else state.body.push({ id: uuid(), date, weight: w });
+    save(); showToast("Weight logged");
+  },
+  "bd-del": id => { state.body = state.body.filter(b => b.id !== id); save(); },
   "export-data": () => {
     try {
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
@@ -827,6 +1230,138 @@ const actions = {
       state.foods.push({ id: uuid(), name, serving, m });
     }
     closeModal(); save();
+  },
+
+  /* recipes */
+  "foods-seg": id => { ui.foodsSeg = id; render(); },
+  "new-recipe": () => { ui.re = { id: null, name: "", servings: 4, ingredients: [], picking: false, search: "" }; refreshReModal(); },
+  "edit-recipe": id => {
+    const r = state.recipes.find(x => x.id === id);
+    if (!r) return;
+    ui.re = { id: r.id, name: r.name, servings: r.servings, ingredients: r.ingredients.map(ing => Object.assign({}, ing)), picking: false, search: "" };
+    refreshReModal();
+  },
+  "del-recipe": id => {
+    const r = state.recipes.find(x => x.id === id);
+    if (r && confirm('Delete recipe "' + r.name + '"? It will also come off any meal plans.')) {
+      state.recipes = state.recipes.filter(x => x.id !== id);
+      Object.keys(state.plan).forEach(ds => {
+        const day = state.plan[ds];
+        Object.keys(day).forEach(k => { day[k] = day[k].filter(en => !(en.kind === "recipe" && en.refId === id)); });
+      });
+      save();
+    }
+  },
+  "re-open-pick": () => { snapshotReInputs(); ui.re.picking = true; ui.re.search = ""; refreshReModal(); },
+  "re-pick-cancel": () => { ui.re.picking = false; refreshReModal(); },
+  "re-pick-food": id => {
+    const f = state.foods.find(x => x.id === id);
+    if (f) ui.re.ingredients.push({ id: uuid(), foodId: f.id, name: f.name, servings: 1 });
+    ui.re.picking = false; refreshReModal();
+  },
+  "re-pick-custom": () => {
+    const name = (ui.re.search || "").trim();
+    if (name) ui.re.ingredients.push({ id: uuid(), foodId: null, name, servings: 1 });
+    ui.re.picking = false; refreshReModal();
+  },
+  "re-del-ing": i => { snapshotReInputs(); ui.re.ingredients.splice(Number(i), 1); refreshReModal(); },
+  "re-save": () => {
+    snapshotReInputs();
+    const name = (ui.re.name || "").trim();
+    if (!name) { alert("Give the recipe a name."); return; }
+    if (!ui.re.ingredients.length) { alert("Add at least one ingredient."); return; }
+    if (ui.re.id) {
+      const r = state.recipes.find(x => x.id === ui.re.id);
+      if (r) { r.name = name; r.servings = ui.re.servings; r.ingredients = ui.re.ingredients; }
+    } else {
+      state.recipes.push({ id: uuid(), name, servings: ui.re.servings, ingredients: ui.re.ingredients });
+    }
+    closeModal(); save();
+  },
+
+  /* meal plan */
+  "plan-prev": () => { ui.planOffset -= 1; render(); },
+  "plan-next": () => { ui.planOffset += 1; render(); },
+  "plan-add": id => {
+    const parts = id.split("|");
+    ui.pm = { ds: parts[0], slot: parts[1], mode: "recipe", search: "", refId: null, servings: 1 };
+    refreshPmModal();
+  },
+  "pm-mode": id => { snapshotPm(); ui.pm.mode = id; ui.pm.refId = null; refreshPmModal(); },
+  "pm-pick": id => { snapshotPm(); ui.pm.refId = (ui.pm.refId === id ? null : id); refreshPmModal(); },
+  "pm-save": () => {
+    snapshotPm();
+    if (!ui.pm.refId) { alert("Pick a recipe or food first."); return; }
+    const kind = ui.pm.mode;
+    const src = kind === "recipe" ? state.recipes.find(r => r.id === ui.pm.refId) : state.foods.find(f => f.id === ui.pm.refId);
+    const day = state.plan[ui.pm.ds] = planDay(ui.pm.ds);
+    day[ui.pm.slot].push({ id: uuid(), kind, refId: ui.pm.refId, name: src ? src.name : "", servings: ui.pm.servings || 1 });
+    closeModal(); save();
+  },
+  "plan-del": id => {
+    const p = id.split("|");
+    const day = state.plan[p[0]];
+    if (day) { day[p[1]] = day[p[1]].filter(en => en.id !== p[2]); save(); }
+  },
+  "plan-log": id => {
+    const p = id.split("|");
+    const day = state.plan[p[0]];
+    const en = day && day[p[1]].find(x => x.id === p[2]);
+    if (!en) return;
+    let m = null;
+    if (en.kind === "recipe") {
+      const r = state.recipes.find(x => x.id === en.refId);
+      if (r) m = recipePerServing(r);
+    } else {
+      const f = state.foods.find(x => x.id === en.refId);
+      if (f) m = Object.assign({}, f.m);
+    }
+    if (!m) { alert("That recipe or food no longer exists."); return; }
+    state.log.push({ id: uuid(), date: p[0], name: planEntryLabel(en), servings: en.servings, m });
+    persist();
+    showToast("Added to " + prettyShort(p[0]) + " food log");
+  },
+  "gen-shopping": () => {
+    const dates = planWeekDates();
+    const agg = {};
+    dates.forEach(ds => {
+      const day = planDay(ds);
+      SLOTS.forEach(sl => day[sl[0]].forEach(en => {
+        if (en.kind === "recipe") {
+          const r = state.recipes.find(x => x.id === en.refId);
+          if (!r) return;
+          const factor = (en.servings || 1) / Math.max(r.servings, 0.5);
+          r.ingredients.forEach(ing => {
+            const k = ing.name.trim().toLowerCase();
+            agg[k] = agg[k] || { name: ing.name, n: 0 };
+            agg[k].n += ing.servings * factor;
+          });
+        } else {
+          const f = state.foods.find(x => x.id === en.refId);
+          const nm = f ? f.name : en.name;
+          if (!nm) return;
+          const k = nm.trim().toLowerCase();
+          agg[k] = agg[k] || { name: nm, n: 0 };
+          agg[k].n += en.servings || 1;
+        }
+      }));
+    });
+    const keys = Object.keys(agg).sort();
+    if (!keys.length) { alert("Nothing planned this week yet — add some meals first."); return; }
+    const first = fromDateStr(dates[0]);
+    const o = {
+      id: uuid(),
+      name: "Groceries · Week of " + MONTHS[first.getMonth()] + " " + first.getDate(),
+      createdAt: Date.now(),
+      items: keys.map(k => {
+        const n = Math.round(agg[k].n * 100) / 100;
+        return { id: uuid(), name: agg[k].name, qty: "≈" + neat(n) + " serving" + (n === 1 ? "" : "s"),
+                 purchased: false, skip: pantryHasEnough(agg[k].name) };
+      })
+    };
+    state.orders.unshift(o);
+    ui.tab = "shopping"; ui.orderId = o.id;
+    save(); showToast("Shopping list created");
   },
 
   /* shopping */
@@ -892,7 +1427,7 @@ const actions = {
       else state.pantry.push({ id: uuid(), name: it.name, qty: it.qty, enough: true });
     });
     save();
-    alert("Purchased items are now stocked in your Pantry.");
+    showToast("Purchased items stocked in Pantry");
   },
   "add-low-stock": () => {
     const o = state.orders.find(x => x.id === ui.orderId);
@@ -905,7 +1440,7 @@ const actions = {
       }
     });
     save();
-    if (!added) alert("Nothing in your pantry is marked as running low.");
+    if (!added) showToast("Nothing in your pantry is marked as low");
   },
 
   /* pantry */
@@ -913,9 +1448,21 @@ const actions = {
     const name = (document.getElementById("pantry-name").value || "").trim();
     if (!name) return;
     const qty = (document.getElementById("pantry-qty").value || "").trim();
-    state.pantry.push({ id: uuid(), name, qty, enough: true });
+    const expEl = document.getElementById("pantry-exp");
+    state.pantry.push({ id: uuid(), name, qty, enough: true, exp: (expEl && expEl.value) || "" });
     state.pantry.sort((a, b) => a.name.localeCompare(b.name));
     save();
+  },
+  "edit-exp": id => { const p = state.pantry.find(x => x.id === id); if (p) openModal(expModalHTML(p)); },
+  "pe-save": () => {
+    const p = state.pantry.find(x => x.id === document.getElementById("pe-id").value);
+    if (p) p.exp = document.getElementById("pe-date").value || "";
+    closeModal(); save();
+  },
+  "pe-clear": () => {
+    const p = state.pantry.find(x => x.id === document.getElementById("pe-id").value);
+    if (p) p.exp = "";
+    closeModal(); save();
   },
   "toggle-pantry": id => {
     const p = state.pantry.find(x => x.id === id);

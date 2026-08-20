@@ -9,15 +9,17 @@ This repo contains **two versions of the same app**:
 
 ## What the app does
 
-**Log tab** — Pick any day and record what you ate, either from your saved foods (two taps) or with "Quick Add" where you type the macros directly. The day's totals show as progress bars against your daily goals: calories, protein, carbs, fat, plus fiber and sugar.
+**Log tab** — Pick any day and record what you ate: from your saved foods, from your recipes, or with "Quick Add" where you type the macros directly. The day's totals show as progress bars against your daily goals: calories, protein, carbs, fat, plus fiber and sugar. A water card tracks ounces against your daily water goal with one-tap +8/+12/+16 oz buttons.
 
-**Stats tab** — Switch between Week, Month, and Year. Shows period totals for every macro, your daily average compared to your goals, and a calories-per-day chart for the week. Arrows let you look back at past periods. Also home to your daily goals and data backup (export/import).
+**Plan tab** — A weekly meal planner: breakfast, lunch, dinner, and snacks for each day, filled from your recipes and foods. One button turns the whole week's plan into a shopping order — ingredient quantities are added up across all meals, and anything your pantry says you still have enough of arrives pre-marked as "skip." A 🍽️ button on any planned meal logs it to that day's food diary.
 
-**Foods tab** — Your personal food library. Save the foods you eat regularly with macros per serving so logging is fast.
+**Foods tab** — Your personal food library plus a recipe builder. Recipes are made from your foods (plus plain items like salt), and macros per serving are calculated automatically from the ingredients and how many servings the recipe makes.
 
-**Shopping tab** — One shopping order per week, and you can switch between weeks. Start a new order empty or copy last week's — copying re-checks your pantry and automatically marks anything you still have enough of as "skip." Items are grouped into **To buy**, **Still have enough — skip**, and **Purchased**. After shopping, one tap stocks everything you bought into your pantry.
+**Shopping tab** — One shopping order per week, and you can switch between weeks. Start a new order empty, copy last week's, or generate one from the meal planner — either way your pantry is re-checked and anything you still have enough of is marked "skip." Items are grouped into **To buy**, **Still have enough — skip**, and **Purchased**. After shopping, one tap stocks everything you bought into your pantry.
 
-**Pantry tab** — The foods you have at home, each marked "Enough" or "Low." Anything marked "Enough" is skipped automatically when it appears on a shopping order; anything "Low" can be added to the week's order with one tap.
+**Pantry tab** — The foods you have at home, each marked "Enough" or "Low." Anything marked "Enough" is skipped automatically when it appears on a shopping order; anything "Low" can be added to the week's order with one tap. Items can carry an expiration date — a "Use soon or toss" warning appears when something is within 3 days of expiring or already past it.
+
+**Stats tab** — Nutrition and Body views. Nutrition: switch between Week, Month, and Year for period totals of every macro, daily averages against your goals, water averages, and a calories-per-day chart. Body: log your weight whenever you weigh in and see a trend chart plus total change. Also home to your daily goals and data backup (export/import).
 
 All data stays on your phone (browser local storage for the web app; a JSON file for the iOS app). No account, no server, no tracking. Use "Export my data" on the Stats tab for backups.
 
