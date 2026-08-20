@@ -44,6 +44,16 @@
     position: sticky; top: 0; background: var(--bg); z-index: 5;
   }
   header h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.3px; }
+  .profile-chip {
+    font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text);
+    background: var(--card); border: none; border-radius: 999px;
+    padding: 7px 12px; cursor: pointer; flex-shrink: 0;
+  }
+  .card.banner {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--accent-soft); color: var(--text);
+  }
+  .fav-star { font-size: 17px; }
   main {
     flex: 1; padding: 0 16px;
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
@@ -207,7 +217,8 @@
 </head>
 <body>
 <div id="app">
-  <header><h1 id="page-title">Food Log</h1></header>
+  <header><div class="row"><h1 id="page-title" class="grow">Food Log</h1>
+    <button class="profile-chip" data-action="open-profiles">👤 <span id="profile-name"></span></button></div></header>
   <main id="content"></main>
   <nav id="tabbar"></nav>
 </div>
@@ -220,7 +231,8 @@
 /* ---------- storage ---------- */
 
 const STORE_KEY = "maf-data-v1";
-let memoryFallback = null;
+const PROFILES_KEY = "maf-profiles-v1";
+const memoryStates = {}; // per-profile fallback when localStorage is unavailable
 
 function uuid() {
   try { return crypto.randomUUID(); } catch (e) {
@@ -248,6 +260,7 @@ function defaultState() {
     recipes: [],   // {id, name, servings, ingredients:[{id, foodId|null, name, servings}]}
     plan: {},      // date -> {b:[], l:[], d:[], s:[]} of {id, kind:'recipe'|'food', refId, name, servings}
     body: [],      // {id, date, weight}
+    dismissed: {}, // banner keys the user has closed
     goals: { cal: 2000, p: 100, c: 250, f: 70, water: 64 }
   };
 }
@@ -258,28 +271,69 @@ function migrate(s) {
   s.recipes = s.recipes || [];
   s.plan = s.plan || {};
   s.body = s.body || [];
+  s.dismissed = s.dismissed || {};
   if (s.goals.water == null) s.goals.water = 64;
   return s;
 }
 
-function loadState() {
+/* ----- profiles: each keeps its own data under its own storage key ----- */
+
+function loadProfilesMeta() {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const raw = localStorage.getItem(PROFILES_KEY);
+    if (raw) {
+      const m = JSON.parse(raw);
+      if (m && Array.isArray(m.profiles) && m.profiles.length) return m;
+    }
+  } catch (e) { /* storage unavailable */ }
+  // "default" maps to the original pre-profiles storage key, so existing data just works.
+  return { profiles: [{ id: "default", name: "Me" }], activeId: "default" };
+}
+
+let profilesMeta = loadProfilesMeta();
+
+function persistProfilesMeta() {
+  try { localStorage.setItem(PROFILES_KEY, JSON.stringify(profilesMeta)); } catch (e) { }
+}
+
+function activeProfile() {
+  return profilesMeta.profiles.find(p => p.id === profilesMeta.activeId) || profilesMeta.profiles[0];
+}
+
+function storeKeyFor(id) { return id === "default" ? STORE_KEY : STORE_KEY + ":" + id; }
+
+function loadState() {
+  const pid = activeProfile().id;
+  try {
+    const raw = localStorage.getItem(storeKeyFor(pid));
     if (raw) {
       const s = JSON.parse(raw);
       if (s && Array.isArray(s.foods)) return migrate(s);
     }
   } catch (e) { /* storage unavailable: fall through to memory */ }
-  return memoryFallback || (memoryFallback = defaultState());
+  return memoryStates[pid] || (memoryStates[pid] = defaultState());
 }
 
 let state = loadState();
 // First run: persist the seed so it isn't re-seeded next time.
 persist();
+persistProfilesMeta();
 
 function persist() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
-  catch (e) { memoryFallback = state; }
+  const pid = activeProfile().id;
+  try { localStorage.setItem(storeKeyFor(pid), JSON.stringify(state)); }
+  catch (e) { memoryStates[pid] = state; }
+}
+
+function switchProfile(id) {
+  if (!profilesMeta.profiles.some(p => p.id === id)) return;
+  persist(); // save the outgoing profile under its own key first
+  profilesMeta.activeId = id;
+  persistProfilesMeta();
+  state = loadState();
+  persist();
+  ui.orderId = null;
+  render();
 }
 
 function save() { persist(); render(); }
@@ -375,12 +429,60 @@ function showToast(msg) {
 
 function prettyShort(s) { const d = fromDateStr(s); return MONTHS[d.getMonth()] + " " + d.getDate(); }
 
+function defaultMeal() {
+  const h = new Date().getHours();
+  if (h < 11) return "b";
+  if (h < 16) return "l";
+  if (h < 21) return "d";
+  return "s";
+}
+
+function weekKey(ds) {
+  const d = fromDateStr(ds);
+  d.setDate(d.getDate() - d.getDay());
+  return toDateStr(d);
+}
+
+function money(n) { return "$" + n.toFixed(2); }
+
+function byFav(a, b) { return (b.fav ? 1 : 0) - (a.fav ? 1 : 0) || a.name.localeCompare(b.name); }
+
+function orderTotal(o) { return o.items.reduce((n, it) => n + (it.price || 0), 0); }
+
+function currentStreak() {
+  let n = 0;
+  let d = todayStr();
+  // An empty "today" doesn't break the streak — the day isn't over yet.
+  if (!state.log.some(en => en.date === d)) d = dateAddDays(d, -1);
+  while (state.log.some(en => en.date === d)) { n++; d = dateAddDays(d, -1); }
+  return n;
+}
+
+function plannedCountForCurrentWeek() {
+  const t = new Date();
+  t.setDate(t.getDate() - t.getDay());
+  let n = 0;
+  for (let i = 0; i < 7; i++) {
+    const day = state.plan[toDateStr(new Date(t.getFullYear(), t.getMonth(), t.getDate() + i))];
+    if (day) SLOTS.forEach(sl => { n += (day[sl[0]] || []).length; });
+  }
+  return n;
+}
+
+function servingPresets(inputId) {
+  return '<div class="water-btns" style="margin-top:6px">' +
+    [["0.5", "½"], ["1", "1"], ["1.5", "1½"], ["2", "2"]].map(p =>
+      '<button class="btn" data-action="srv-preset" data-id="' + inputId + "|" + p[0] + '">' + p[1] + "</button>").join("") +
+    "</div>";
+}
+
 /* ---------- rendering ---------- */
 
 function render() {
   const tab = TABS.find(t => t.id === ui.tab);
   document.getElementById("page-title").textContent =
     (ui.tab === "shopping" && ui.orderId) ? orderName(ui.orderId) : tab.title;
+  document.getElementById("profile-name").textContent = activeProfile().name;
 
   document.getElementById("tabbar").innerHTML = TABS.map(t =>
     '<button data-action="tab" data-id="' + t.id + '" class="' + (t.id === ui.tab ? "active" : "") + '">' +
@@ -419,11 +521,29 @@ function goalBar(label, value, goal, unit, color) {
     '<div class="bar"><div style="width:' + pct.toFixed(1) + "%;background:var(--" + color + ')"></div></div></div>';
 }
 
+function renderBanners() {
+  let html = "";
+  const today = todayStr();
+  const now = new Date();
+  const wk = weekKey(today);
+  if (now.getDay() === 0 && !state.dismissed["plan-" + wk] && plannedCountForCurrentWeek() === 0) {
+    html += '<div class="card banner"><div class="grow small">🗓️ It’s Sunday — want to plan this week’s meals?</div>' +
+      '<button class="btn" data-action="go-plan">Plan</button>' +
+      '<button class="icon-btn" data-action="dismiss" data-id="plan-' + wk + '">✕</button></div>';
+  }
+  if (ui.logDate === today && now.getHours() >= 17 && !state.dismissed["log-" + today] &&
+      !state.log.some(en => en.date === today)) {
+    html += '<div class="card banner"><div class="grow small">🍽️ Nothing logged today yet — dinner’s a good time to catch up.</div>' +
+      '<button class="icon-btn" data-action="dismiss" data-id="log-' + today + '">✕</button></div>';
+  }
+  return html;
+}
+
 function renderLog() {
   const entries = state.log.filter(en => en.date === ui.logDate);
   const t = sumEntries(entries);
   const g = state.goals;
-  let html =
+  let html = renderBanners() +
     '<div class="card"><div class="navline">' +
     '<button class="icon-btn" data-action="log-prev">‹</button>' +
     '<div style="text-align:center"><div class="title">' + prettyDate(ui.logDate) + '</div>' +
@@ -449,15 +569,23 @@ function renderLog() {
   if (entries.length === 0) {
     html += '<div class="empty">Nothing logged yet. Tap “Add food” to record what you ate.</div>';
   } else {
-    html += entries.map(en => {
-      const tot = entryTotal(en);
-      return '<div class="listitem"><div class="grow">' +
-        "<div><b>" + esc(en.name) + "</b>" + (en.servings !== 1 ? ' <span class="muted">×' + neat(en.servings) + "</span>" : "") + "</div>" +
-        '<div class="small muted">' + whole(tot.cal) + " cal · P " + neat(tot.p) + "g · C " + neat(tot.c) + "g · F " + neat(tot.f) + "g</div></div>" +
-        '<button class="icon-btn" data-action="del-entry" data-id="' + en.id + '">✕</button></div>';
-    }).join("");
+    const groups = SLOTS.concat([["o", "Other"]]);
+    groups.forEach(gr => {
+      const list = entries.filter(en => (en.meal || "o") === gr[0]);
+      if (!list.length) return;
+      const gcal = sumEntries(list).cal;
+      html += '<div class="slot"><div class="slotname">' + gr[1] + " · " + whole(gcal) + " cal</div>" +
+        list.map(en => {
+          const tot = entryTotal(en);
+          return '<div class="listitem"><div class="grow">' +
+            "<div><b>" + esc(en.name) + "</b>" + (en.servings !== 1 ? ' <span class="muted">×' + neat(en.servings) + "</span>" : "") + "</div>" +
+            '<div class="small muted">' + whole(tot.cal) + " cal · P " + neat(tot.p) + "g · C " + neat(tot.c) + "g · F " + neat(tot.f) + "g</div></div>" +
+            '<button class="icon-btn" data-action="del-entry" data-id="' + en.id + '">✕</button></div>';
+        }).join("") + "</div>";
+    });
   }
-  html += '<button class="btn primary full" data-action="open-add-entry">＋ Add food</button></div>';
+  html += '<button class="btn primary full" data-action="open-add-entry">＋ Add food</button>' +
+    '<button class="btn full" data-action="repeat-day">↻ Repeat yesterday’s meals</button></div>';
   return html;
 }
 
@@ -524,6 +652,21 @@ function renderNutritionStats() {
   html += '<div class="card"><h2>Totals</h2><div class="statgrid">' +
     stat(whole(t.cal), "Calories") + stat(neat(t.p) + "g", "Protein") + stat(neat(t.c) + "g", "Carbs") +
     stat(neat(t.f) + "g", "Fat") + stat(neat(t.fib) + "g", "Fiber") + stat(neat(t.sug) + "g", "Sugar") +
+    "</div></div>";
+
+  const dayMs = 86400000;
+  const elapsed = Math.max(0, Math.round((Math.min(iv.end.getTime(), fromDateStr(todayStr()).getTime() + dayMs) - iv.start.getTime()) / dayMs));
+  let proteinDays = 0, calDays = 0;
+  days.forEach(ds => {
+    const dt = sumEntries(state.log.filter(en => en.date === ds));
+    if (g.p > 0 && dt.p >= g.p) proteinDays++;
+    if (g.cal > 0 && dt.cal <= g.cal) calDays++;
+  });
+  html += '<div class="card"><h2>Report card</h2><div class="statgrid">' +
+    stat(loggedDays + "/" + elapsed, "Days logged") +
+    stat(String(currentStreak()), "Day streak") +
+    stat(String(proteinDays), "Protein goal hit") +
+    stat(String(calDays), "Calories on target") +
     "</div></div>";
 
   html += '<div class="card"><h2>Daily average · ' + loggedDays + " logged day" + (loggedDays === 1 ? "" : "s") + "</h2>";
@@ -605,6 +748,41 @@ function renderBody() {
 
   if (entries.length >= 2) html += '<div class="card"><h2>Trend</h2>' + weightChart(entries) + "</div>";
 
+  // Pair each week's average calorie intake with its last weigh-in.
+  if (entries.length) {
+    const weeks = {};
+    state.log.forEach(en => {
+      const wk = weekKey(en.date);
+      const w = weeks[wk] = weeks[wk] || { cal: 0, days: new Set(), weight: null };
+      w.cal += entryTotal(en).cal;
+      w.days.add(en.date);
+    });
+    entries.forEach(en => {
+      const wk = weekKey(en.date);
+      const w = weeks[wk] = weeks[wk] || { cal: 0, days: new Set(), weight: null };
+      w.weight = en.weight; // entries are date-ascending, so the last one per week wins
+    });
+    const wkKeys = Object.keys(weeks).filter(k => weeks[k].weight != null).sort().slice(-8);
+    if (wkKeys.length >= 2) {
+      let prev = null;
+      const rows = wkKeys.map(k => {
+        const w = weeks[k];
+        const avg = w.days.size ? w.cal / w.days.size : 0;
+        const change = prev == null ? null : w.weight - prev;
+        prev = w.weight;
+        return '<div class="row small" style="justify-content:space-between;padding:3px 0">' +
+          '<span class="muted">Wk of ' + prettyShort(k) + "</span>" +
+          "<span>" + (avg ? whole(avg) + " cal/day" : "—") + "</span>" +
+          "<b>" + neat(w.weight) + " lb" +
+          (change == null || change === 0 ? "" : ' <span class="' + (change < 0 ? "muted" : "") + '" style="font-weight:600">(' + (change > 0 ? "+" : "−") + neat(Math.abs(change)) + ")</span>") +
+          "</b></div>";
+      }).join("");
+      html += '<div class="card"><h2>Weight vs calories</h2>' +
+        '<div class="empty" style="padding-top:0">Each week’s average intake next to where your weight ended up — watch which calorie level moves the number.</div>' +
+        rows + "</div>";
+    }
+  }
+
   if (!entries.length) {
     html += '<div class="card"><div class="empty">Log your weight whenever you weigh in — a trend chart appears once you have two entries.</div></div>';
   } else {
@@ -624,8 +802,13 @@ function renderBody() {
 
 function foodsFiltered() {
   const q = ui.foodSearch.trim().toLowerCase();
-  const foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const foods = state.foods.slice().sort(byFav);
   return q ? foods.filter(f => f.name.toLowerCase().includes(q)) : foods;
+}
+
+function starBtn(action, item) {
+  return '<button class="icon-btn fav-star" data-action="' + action + '" data-id="' + item.id + '" style="color:' +
+    (item.fav ? "var(--cal)" : "var(--muted)") + '">' + (item.fav ? "★" : "☆") + "</button>";
 }
 
 function foodListHTML() {
@@ -635,6 +818,7 @@ function foodListHTML() {
     '<div class="listitem"><div class="grow" data-action="edit-food" data-id="' + f.id + '" style="cursor:pointer">' +
     "<div><b>" + esc(f.name) + '</b> <span class="small muted">' + esc(f.serving) + "</span></div>" +
     '<div class="small muted">' + whole(f.m.cal) + " cal · P " + neat(f.m.p) + "g · C " + neat(f.m.c) + "g · F " + neat(f.m.f) + "g</div></div>" +
+    starBtn("fav-food", f) +
     '<button class="icon-btn" data-action="del-food" data-id="' + f.id + '">✕</button></div>'
   ).join("");
 }
@@ -665,20 +849,21 @@ function recipePerServing(r) {
 }
 
 function recipeListHTML() {
-  const rs = state.recipes.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const rs = state.recipes.slice().sort(byFav);
   if (!rs.length) return '<div class="empty">Build recipes from your foods — macros per serving are calculated automatically, and the meal planner can turn a week of recipes into a shopping list.</div>';
   return rs.map(r => {
     const per = recipePerServing(r);
     return '<div class="listitem"><div class="grow" data-action="edit-recipe" data-id="' + r.id + '" style="cursor:pointer">' +
       "<div><b>" + esc(r.name) + '</b> <span class="small muted">makes ' + neat(r.servings) + "</span></div>" +
       '<div class="small muted">per serving: ' + whole(per.cal) + " cal · P " + neat(per.p) + "g · C " + neat(per.c) + "g · F " + neat(per.f) + "g</div></div>" +
+      starBtn("fav-recipe", r) +
       '<button class="icon-btn" data-action="del-recipe" data-id="' + r.id + '">✕</button></div>';
   }).join("");
 }
 
 function rePickListHTML() {
   const q = (ui.re.search || "").trim().toLowerCase();
-  let foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
+  let foods = state.foods.slice().sort(byFav);
   if (q) foods = foods.filter(f => f.name.toLowerCase().includes(q));
   let html = foods.map(f =>
     '<button class="foodpick" data-action="re-pick-food" data-id="' + f.id + '"><span><b>' + esc(f.name) +
@@ -746,7 +931,16 @@ function defaultOrderName() {
 }
 
 function renderOrders() {
-  let html = '<div class="card">';
+  let html = "";
+  const priced = state.orders.filter(o => orderTotal(o) > 0).slice(0, 8);
+  if (priced.length) {
+    const avg = priced.reduce((n, o) => n + orderTotal(o), 0) / priced.length;
+    html += '<div class="card"><h2>Grocery spending</h2>' +
+      priced.map(o =>
+        '<div class="row small" style="justify-content:space-between;padding:3px 0"><span class="muted">' + esc(o.name) + "</span><b>" + money(orderTotal(o)) + "</b></div>").join("") +
+      '<div class="row small" style="justify-content:space-between;border-top:1px solid var(--line);margin-top:6px;padding-top:6px"><span class="muted">Average per order</span><b>' + money(avg) + "</b></div></div>";
+  }
+  html += '<div class="card">';
   if (state.orders.length === 0) {
     html += '<div class="empty">Create an order for this week’s shopping. Each week gets its own list, and you can copy last week’s order to start.</div>';
   } else {
@@ -757,6 +951,8 @@ function renderOrders() {
       const parts = [toBuy + " to buy"];
       if (skip) parts.push(skip + " skipped");
       if (bought) parts.push(bought + " purchased");
+      const spent = orderTotal(o);
+      if (spent > 0) parts.push(money(spent));
       return '<div class="listitem"><div class="grow" data-action="open-order" data-id="' + o.id + '" style="cursor:pointer">' +
         "<div><b>" + esc(o.name) + "</b></div>" +
         '<div class="small muted">' + parts.join(" · ") + "</div></div>" +
@@ -768,13 +964,26 @@ function renderOrders() {
 }
 
 function shoppingItemRow(o, it) {
+  const priceBtn = it.purchased
+    ? '<button class="exp ok" data-action="edit-price" data-id="' + it.id + '">' +
+      (it.price ? money(it.price) : "$ add") + "</button>"
+    : "";
   return '<div class="listitem">' +
     '<button class="check ' + (it.purchased ? "on" : "") + '" data-action="toggle-purchased" data-id="' + it.id + '">✓</button>' +
     '<div class="grow"><div class="' + (it.skip ? "strike" : "") + '"><b>' + esc(it.name) + "</b>" +
     (it.qty ? ' <span class="small muted">' + esc(it.qty) + "</span>" : "") + "</div></div>" +
+    priceBtn +
     '<button class="pill ' + (it.skip ? "enough" : "low") + '" data-action="toggle-skip" data-id="' + it.id + '">' +
     (it.skip ? "Need it" : "Have enough") + "</button>" +
     '<button class="icon-btn" data-action="del-shop-item" data-id="' + it.id + '">✕</button></div>';
+}
+
+function priceModalHTML(it) {
+  return modalHead("Price") +
+    '<div class="empty" style="padding-top:0">' + esc(it.name) + " — what did it cost?</div>" +
+    '<input type="hidden" id="pr-id" value="' + it.id + '">' +
+    '<div class="field"><label>Price ($)</label><input type="number" id="pr-price" inputmode="decimal" step="0.01" min="0" value="' + (it.price || "") + '"></div>' +
+    '<button class="btn primary full" data-action="pr-save">Save</button>';
 }
 
 function renderOrder() {
@@ -800,7 +1009,9 @@ function renderOrder() {
       skipped.map(it => shoppingItemRow(o, it)).join("") + "</div>";
   }
   if (purchased.length) {
-    html += '<div class="card"><h2>Purchased · ' + purchased.length + "</h2>" +
+    const spent = orderTotal(o);
+    html += '<div class="card"><h2>Purchased · ' + purchased.length + (spent > 0 ? " · " + money(spent) : "") + "</h2>" +
+      '<div class="empty" style="padding-top:0">Tap the $ on an item to note what it cost.</div>' +
       purchased.map(it => shoppingItemRow(o, it)).join("") +
       '<button class="btn full" data-action="stock-pantry">🧺 Stock purchased items into Pantry</button></div>';
   }
@@ -863,7 +1074,7 @@ function renderPlan() {
 function pmListHTML() {
   const q = (ui.pm.search || "").trim().toLowerCase();
   if (ui.pm.mode === "recipe") {
-    let rs = state.recipes.slice().sort((a, b) => a.name.localeCompare(b.name));
+    let rs = state.recipes.slice().sort(byFav);
     if (q) rs = rs.filter(r => r.name.toLowerCase().includes(q));
     if (!rs.length) return '<div class="empty">No recipes' + (q ? " match" : " yet — build one on the Foods tab") + ".</div>";
     return rs.map(r =>
@@ -871,7 +1082,7 @@ function pmListHTML() {
       '</b><br><span class="small muted">' + whole(recipePerServing(r).cal) + " cal/serving</span></span>" +
       (ui.pm.refId === r.id ? '<span class="tick">✓</span>' : "") + "</button>").join("");
   }
-  let foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
+  let foods = state.foods.slice().sort(byFav);
   if (q) foods = foods.filter(f => f.name.toLowerCase().includes(q));
   if (!foods.length) return '<div class="empty">No foods match.</div>';
   return foods.map(f =>
@@ -889,7 +1100,8 @@ function pmModalHTML() {
     '<input type="search" id="pm-search" placeholder="Search" value="' + esc(ui.pm.search || "") + '">' +
     '<div id="pm-list" style="max-height:34dvh;overflow-y:auto;margin-top:6px">' + pmListHTML() + "</div>" +
     '<div class="field" style="margin-top:12px"><label>Servings</label>' +
-    '<input type="number" id="pm-servings" inputmode="decimal" step="0.25" min="0.25" value="' + (ui.pm.servings || 1) + '"></div>' +
+    '<input type="number" id="pm-servings" inputmode="decimal" step="0.25" min="0.25" value="' + (ui.pm.servings || 1) + '">' +
+    servingPresets("pm-servings") + "</div>" +
     '<button class="btn primary full" data-action="pm-save">Add to plan</button>';
 }
 
@@ -994,7 +1206,7 @@ function modalHead(title) {
 function amPickListHTML() {
   const q = (ui.am.search || "").trim().toLowerCase();
   if (ui.am.mode === "recipe") {
-    let rs = state.recipes.slice().sort((a, b) => a.name.localeCompare(b.name));
+    let rs = state.recipes.slice().sort(byFav);
     if (q) rs = rs.filter(r => r.name.toLowerCase().includes(q));
     if (!rs.length) return '<div class="empty">No recipes' + (q ? " match" : " yet — build one on the Foods tab") + ".</div>";
     return rs.map(r => {
@@ -1004,7 +1216,7 @@ function amPickListHTML() {
         (ui.am.recipeId === r.id ? '<span class="tick">✓</span>' : "") + "</button>";
     }).join("");
   }
-  let foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
+  let foods = state.foods.slice().sort(byFav);
   if (q) foods = foods.filter(f => f.name.toLowerCase().includes(q));
   if (!foods.length) return '<div class="empty">No foods match.</div>';
   return foods.map(f =>
@@ -1030,8 +1242,12 @@ function addEntryModalHTML() {
       '<input type="text" id="am-name" placeholder="e.g. Turkey sandwich" value="' + esc(ui.am.qname || "") + '"></div>' +
       '<div class="macro-grid">' + macroInputs("am", ui.am.qm || ZERO) + "</div>";
   }
-  html += '<div class="field" style="margin-top:12px"><label>Servings</label>' +
-    '<input type="number" id="am-servings" inputmode="decimal" step="0.25" min="0.25" value="' + (ui.am.servings || 1) + '"></div>' +
+  html += '<div class="field" style="margin-top:12px"><label>Meal</label>' +
+    '<div class="seg" style="margin-bottom:0">' + SLOTS.map(sl =>
+      '<button data-action="am-meal" data-id="' + sl[0] + '" class="' + (ui.am.meal === sl[0] ? "active" : "") + '">' + sl[1] + "</button>").join("") + "</div></div>" +
+    '<div class="field"><label>Servings</label>' +
+    '<input type="number" id="am-servings" inputmode="decimal" step="0.25" min="0.25" value="' + (ui.am.servings || 1) + '">' +
+    servingPresets("am-servings") + "</div>" +
     '<button class="btn primary full" data-action="am-save">Add to log</button>';
   return html;
 }
@@ -1116,6 +1332,30 @@ function renameModalHTML(o) {
     '<button class="btn primary full" data-action="rn-save">Save</button>';
 }
 
+/* ----- profiles modal ----- */
+
+function profilesModalHTML() {
+  return modalHead("Profiles") +
+    '<div class="empty" style="padding-top:0">Each profile keeps its own foods, logs, plans, and pantry — all stored on this phone. Deleting a profile removes its data from this phone for good.</div>' +
+    profilesMeta.profiles.map(p =>
+      '<div class="listitem">' +
+      '<button class="foodpick grow" style="border-bottom:none;padding:6px 0" data-action="switch-profile" data-id="' + p.id + '">' +
+      "<span><b>" + esc(p.name) + "</b></span>" +
+      (p.id === profilesMeta.activeId ? '<span class="tick">✓</span>' : "") + "</button>" +
+      '<button class="icon-btn" data-action="rename-profile" data-id="' + p.id + '">✏️</button>' +
+      (profilesMeta.profiles.length > 1 ? '<button class="icon-btn" data-action="del-profile" data-id="' + p.id + '">✕</button>' : "") +
+      "</div>").join("") +
+    '<div class="row" style="margin-top:10px"><input type="text" id="np-name" placeholder="New profile name" class="grow">' +
+    '<button class="btn primary" data-action="add-profile">Add</button></div>';
+}
+
+function renameProfileModalHTML(p) {
+  return modalHead("Rename Profile") +
+    '<input type="hidden" id="rp-id" value="' + p.id + '">' +
+    '<div class="field"><input type="text" id="rp-name" value="' + esc(p.name) + '"></div>' +
+    '<button class="btn primary full" data-action="rp-save">Save</button>';
+}
+
 /* ---------- export / import ---------- */
 
 function handleImport() {
@@ -1143,29 +1383,93 @@ const actions = {
   "tab": id => { ui.tab = id; render(); },
   "close-modal": () => closeModal(),
 
+  /* profiles */
+  "open-profiles": () => openModal(profilesModalHTML()),
+  "switch-profile": id => {
+    if (id !== profilesMeta.activeId) {
+      switchProfile(id);
+      showToast("Switched to " + activeProfile().name);
+    }
+    closeModal();
+  },
+  "add-profile": () => {
+    const el = document.getElementById("np-name");
+    const name = (el && el.value || "").trim();
+    if (!name) return;
+    profilesMeta.profiles.push({ id: uuid(), name });
+    persistProfilesMeta();
+    openModal(profilesModalHTML());
+  },
+  "rename-profile": id => {
+    const p = profilesMeta.profiles.find(x => x.id === id);
+    if (p) openModal(renameProfileModalHTML(p));
+  },
+  "rp-save": () => {
+    const p = profilesMeta.profiles.find(x => x.id === document.getElementById("rp-id").value);
+    const name = (document.getElementById("rp-name").value || "").trim();
+    if (p && name) { p.name = name; persistProfilesMeta(); }
+    openModal(profilesModalHTML());
+    render();
+  },
+  "del-profile": id => {
+    const p = profilesMeta.profiles.find(x => x.id === id);
+    if (!p || profilesMeta.profiles.length < 2) return;
+    if (!confirm('Delete profile "' + p.name + '" and all of its data from this phone? This can’t be undone.')) return;
+    try { localStorage.removeItem(storeKeyFor(id)); } catch (e) { }
+    delete memoryStates[id];
+    profilesMeta.profiles = profilesMeta.profiles.filter(x => x.id !== id);
+    if (profilesMeta.activeId === id) {
+      profilesMeta.activeId = profilesMeta.profiles[0].id;
+      state = loadState();
+      ui.orderId = null;
+    }
+    persistProfilesMeta();
+    openModal(profilesModalHTML());
+    render();
+  },
+
   /* log */
   "log-prev": () => { ui.logDate = dateAddDays(ui.logDate, -1); render(); },
   "log-next": () => { ui.logDate = dateAddDays(ui.logDate, 1); render(); },
   "del-entry": id => { state.log = state.log.filter(en => en.id !== id); save(); },
-  "open-add-entry": () => { ui.am = { mode: "lib", search: "", foodId: null, servings: 1 }; refreshAddEntryModal(); },
+  "open-add-entry": () => { ui.am = { mode: "lib", search: "", foodId: null, servings: 1, meal: defaultMeal() }; refreshAddEntryModal(); },
   "am-mode": id => { snapshotAmInputs(); ui.am.mode = id; refreshAddEntryModal(); },
+  "am-meal": id => { snapshotAmInputs(); ui.am.meal = id; refreshAddEntryModal(); },
+  "srv-preset": id => {
+    const parts = id.split("|");
+    const el = document.getElementById(parts[0]);
+    if (el) el.value = parts[1];
+  },
+  "repeat-day": () => {
+    const src = dateAddDays(ui.logDate, -1);
+    const entries = state.log.filter(en => en.date === src);
+    if (!entries.length) { showToast("Nothing logged on " + prettyShort(src)); return; }
+    entries.forEach(en => state.log.push({
+      id: uuid(), date: ui.logDate, name: en.name, servings: en.servings, meal: en.meal, m: Object.assign({}, en.m)
+    }));
+    save();
+    showToast("Copied " + entries.length + " item" + (entries.length === 1 ? "" : "s") + " from " + prettyShort(src));
+  },
+  "dismiss": id => { state.dismissed[id] = 1; save(); },
+  "go-plan": () => { ui.tab = "plan"; ui.planOffset = 0; render(); },
   "am-pick": id => { snapshotAmInputs(); ui.am.foodId = (ui.am.foodId === id ? null : id); refreshAddEntryModal(); },
   "am-pick-rec": id => { snapshotAmInputs(); ui.am.recipeId = (ui.am.recipeId === id ? null : id); refreshAddEntryModal(); },
   "am-save": () => {
     snapshotAmInputs();
     const servings = ui.am.servings || 1;
+    const meal = ui.am.meal || defaultMeal();
     if (ui.am.mode === "lib") {
       const f = state.foods.find(x => x.id === ui.am.foodId);
       if (!f) { alert("Pick a food first (or use Quick Add)."); return; }
-      state.log.push({ id: uuid(), date: ui.logDate, name: f.name, servings, m: Object.assign({}, f.m) });
+      state.log.push({ id: uuid(), date: ui.logDate, name: f.name, servings, meal, m: Object.assign({}, f.m) });
     } else if (ui.am.mode === "recipe") {
       const r = state.recipes.find(x => x.id === ui.am.recipeId);
       if (!r) { alert("Pick a recipe first."); return; }
-      state.log.push({ id: uuid(), date: ui.logDate, name: r.name, servings, m: recipePerServing(r) });
+      state.log.push({ id: uuid(), date: ui.logDate, name: r.name, servings, meal, m: recipePerServing(r) });
     } else {
       const name = (ui.am.qname || "").trim();
       if (!name) { alert("Give it a name first."); return; }
-      state.log.push({ id: uuid(), date: ui.logDate, name, servings, m: ui.am.qm || Object.assign({}, ZERO) });
+      state.log.push({ id: uuid(), date: ui.logDate, name, servings, meal, m: ui.am.qm || Object.assign({}, ZERO) });
     }
     closeModal(); save();
   },
@@ -1231,6 +1535,9 @@ const actions = {
     }
     closeModal(); save();
   },
+
+  "fav-food": id => { const f = state.foods.find(x => x.id === id); if (f) { f.fav = !f.fav; save(); } },
+  "fav-recipe": id => { const r = state.recipes.find(x => x.id === id); if (r) { r.fav = !r.fav; save(); } },
 
   /* recipes */
   "foods-seg": id => { ui.foodsSeg = id; render(); },
@@ -1317,7 +1624,7 @@ const actions = {
       if (f) m = Object.assign({}, f.m);
     }
     if (!m) { alert("That recipe or food no longer exists."); return; }
-    state.log.push({ id: uuid(), date: p[0], name: planEntryLabel(en), servings: en.servings, m });
+    state.log.push({ id: uuid(), date: p[0], name: planEntryLabel(en), servings: en.servings, meal: p[1], m });
     persist();
     showToast("Added to " + prettyShort(p[0]) + " food log");
   },
@@ -1403,6 +1710,17 @@ const actions = {
     const qty = (document.getElementById("shop-qty").value || "").trim();
     o.items.push({ id: uuid(), name, qty, purchased: false, skip: pantryHasEnough(name) });
     save();
+  },
+  "edit-price": id => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    const it = o && o.items.find(x => x.id === id);
+    if (it) openModal(priceModalHTML(it));
+  },
+  "pr-save": () => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    const it = o && o.items.find(x => x.id === document.getElementById("pr-id").value);
+    if (it) { const v = readNum("pr-price"); it.price = v > 0 ? v : 0; }
+    closeModal(); save();
   },
   "del-shop-item": id => {
     const o = state.orders.find(x => x.id === ui.orderId);
