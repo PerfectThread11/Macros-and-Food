@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Macros &amp; Food</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Macros">
+<meta name="theme-color" content="#2eb872">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  :root {
+    --bg: #f2f2f7; --card: #ffffff; --text: #1c1c1e; --muted: #6e6e73;
+    --line: #e5e5ea; --accent: #2eb872; --accent-soft: #e2f6ec;
+    --cal: #ff9500; --protein: #ff3b30; --carbs: #007aff; --fat: #eab308;
+    --danger: #ff3b30; --warn: #ff9500; --track: #e5e5ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989e;
+      --line: #2c2c2e; --accent: #34c77b; --accent-soft: #12301f;
+      --fat: #facc15; --track: #3a3a3c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #000000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989e;
+    --line: #2c2c2e; --accent: #34c77b; --accent-soft: #12301f;
+    --fat: #facc15; --track: #3a3a3c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    overscroll-behavior-y: none;
+  }
+  #app { display: flex; flex-direction: column; min-height: 100dvh; }
+  header {
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 16px 10px;
+    position: sticky; top: 0; background: var(--bg); z-index: 5;
+  }
+  header h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.3px; }
+  main {
+    flex: 1; padding: 0 16px;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+  }
+  nav#tabbar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+    display: flex; border-top: 1px solid var(--line);
+    background: var(--card);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  nav#tabbar button {
+    flex: 1; background: none; border: none; padding: 8px 0 6px;
+    font-size: 10px; font-weight: 600; color: var(--muted); cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    font-family: inherit;
+  }
+  nav#tabbar button .ic { font-size: 22px; line-height: 1.1; }
+  nav#tabbar button.active { color: var(--accent); }
+  .card {
+    background: var(--card); border-radius: 14px; padding: 14px;
+    margin-bottom: 12px;
+  }
+  .card h2 {
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.4px; color: var(--muted); margin-bottom: 10px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .grow { flex: 1; min-width: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .strike { text-decoration: line-through; color: var(--muted); }
+  button.btn {
+    font-family: inherit; font-size: 15px; font-weight: 600;
+    border: none; border-radius: 10px; padding: 10px 14px; cursor: pointer;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  button.btn.primary { background: var(--accent); color: #fff; }
+  button.btn.full { width: 100%; margin-top: 8px; }
+  button.icon-btn {
+    background: none; border: none; font-size: 20px; cursor: pointer;
+    color: var(--muted); padding: 6px; font-family: inherit;
+  }
+  input[type=text], input[type=number], input[type=date], input[type=search] {
+    font-family: inherit; font-size: 16px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; width: 100%; -webkit-appearance: none; appearance: none;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .listitem {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  .listitem:last-child { border-bottom: none; }
+  .seg { display: flex; background: var(--bg); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
+  .seg button {
+    flex: 1; border: none; border-radius: 8px; padding: 7px 0;
+    font-family: inherit; font-size: 14px; font-weight: 600;
+    background: none; color: var(--muted); cursor: pointer;
+  }
+  .seg button.active { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .bar { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 4px; }
+  .goalrow { margin-bottom: 10px; }
+  .goalrow .lbl { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px; }
+  .navline { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .navline .title { font-weight: 700; font-size: 16px; }
+  .navline button { min-width: 44px; }
+  .check {
+    width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--muted);
+    background: none; cursor: pointer; flex-shrink: 0; font-size: 15px;
+    color: transparent; line-height: 1;
+  }
+  .check.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pill {
+    font-family: inherit; font-size: 12px; font-weight: 700; border: none;
+    border-radius: 999px; padding: 5px 10px; cursor: pointer; flex-shrink: 0;
+  }
+  .pill.enough { background: var(--accent-soft); color: var(--accent); }
+  .pill.low { background: #fff3e0; color: var(--warn); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pill.low { background: #3a2a12; } }
+  :root[data-theme="dark"] .pill.low { background: #3a2a12; }
+  .empty { color: var(--muted); font-size: 14px; padding: 8px 0; line-height: 1.45; }
+  #modal-root {
+    position: fixed; inset: 0; z-index: 50; display: none;
+    background: rgba(0,0,0,0.45); align-items: flex-end; justify-content: center;
+  }
+  #modal-root.open { display: flex; }
+  #modal {
+    background: var(--card); width: 100%; max-width: 560px;
+    border-radius: 18px 18px 0 0; max-height: 88dvh; overflow-y: auto;
+    padding: 16px 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
+  }
+  #modal h3 { font-size: 18px; font-weight: 800; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .macro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .foodpick {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    background: none; border: none; border-bottom: 1px solid var(--line);
+    padding: 10px 2px; font-family: inherit; font-size: 15px; color: var(--text);
+    text-align: left; cursor: pointer;
+  }
+  .foodpick .tick { margin-left: auto; color: var(--accent); font-weight: 800; }
+  .daybar { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 12px; }
+  .daybar .d { width: 34px; color: var(--muted); font-weight: 600; }
+  .daybar .v { width: 46px; text-align: right; color: var(--muted); }
+  .daybar .bar { flex: 1; }
+  .hint { font-size: 12px; color: var(--warn); margin-top: 6px; line-height: 1.4; }
+  .backlink {
+    background: none; border: none; color: var(--accent); font-family: inherit;
+    font-size: 15px; font-weight: 600; cursor: pointer; padding: 0 0 10px;
+  }
+  .statgrid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .stat { background: var(--bg); border-radius: 10px; padding: 10px; text-align: center; }
+  .stat .v { font-size: 17px; font-weight: 800; }
+  .stat .l { font-size: 11px; color: var(--muted); font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header><h1 id="page-title">Food Log</h1></header>
+  <main id="content"></main>
+  <nav id="tabbar"></nav>
+</div>
+<div id="modal-root"><div id="modal"></div></div>
+
+<script>
+"use strict";
+
+/* ---------- storage ---------- */
+
+const STORE_KEY = "maf-data-v1";
+let memoryFallback = null;
+
+function uuid() {
+  try { return crypto.randomUUID(); } catch (e) {
+    return "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+  }
+}
+
+function seedFoods() {
+  return [
+    { id: uuid(), name: "Egg", serving: "1 large egg", m: { cal: 72, p: 6.3, c: 0.4, f: 4.8, fib: 0, sug: 0.2 } },
+    { id: uuid(), name: "Chicken Breast", serving: "4 oz cooked", m: { cal: 187, p: 35, c: 0, f: 4, fib: 0, sug: 0 } },
+    { id: uuid(), name: "White Rice", serving: "1 cup cooked", m: { cal: 205, p: 4.3, c: 44.5, f: 0.4, fib: 0.6, sug: 0.1 } },
+    { id: uuid(), name: "Banana", serving: "1 medium", m: { cal: 105, p: 1.3, c: 27, f: 0.4, fib: 3.1, sug: 14.4 } },
+    { id: uuid(), name: "Greek Yogurt", serving: "1 cup plain nonfat", m: { cal: 130, p: 23, c: 9, f: 0.5, fib: 0, sug: 9 } }
+  ];
+}
+
+function defaultState() {
+  return {
+    foods: seedFoods(),
+    log: [],       // {id, date:'YYYY-MM-DD', name, servings, m:{per serving}}
+    pantry: [],    // {id, name, qty, enough}
+    orders: [],    // {id, name, createdAt, items:[{id, name, qty, purchased, skip}]}
+    goals: { cal: 2000, p: 100, c: 250, f: 70 }
+  };
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s && Array.isArray(s.foods)) return s;
+    }
+  } catch (e) { /* storage unavailable: fall through to memory */ }
+  return memoryFallback || (memoryFallback = defaultState());
+}
+
+let state = loadState();
+// First run: persist the seed so it isn't re-seeded next time.
+persist();
+
+function persist() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+  catch (e) { memoryFallback = state; }
+}
+
+function save() { persist(); render(); }
+
+/* ---------- helpers ---------- */
+
+const ZERO = { cal: 0, p: 0, c: 0, f: 0, fib: 0, sug: 0 };
+
+function addM(a, b) {
+  return { cal: a.cal + b.cal, p: a.p + b.p, c: a.c + b.c, f: a.f + b.f, fib: a.fib + b.fib, sug: a.sug + b.sug };
+}
+function scaleM(m, k) {
+  return { cal: m.cal * k, p: m.p * k, c: m.c * k, f: m.f * k, fib: m.fib * k, sug: m.sug * k };
+}
+function entryTotal(en) { return scaleM(en.m, Math.max(en.servings, 0)); }
+function sumEntries(entries) { return entries.reduce((acc, en) => addM(acc, entryTotal(en)), Object.assign({}, ZERO)); }
+
+function whole(n) { return Math.round(n).toLocaleString(); }
+function neat(n) { const r = Math.round(n * 10) / 10; return (r % 1 === 0 ? Math.round(r) : r).toLocaleString(); }
+
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+function toDateStr(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+function fromDateStr(s) {
+  const parts = s.split("-");
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+}
+function todayStr() { return toDateStr(new Date()); }
+function dateAddDays(s, n) { const d = fromDateStr(s); d.setDate(d.getDate() + n); return toDateStr(d); }
+
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const WDAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+function prettyDate(s) {
+  const d = fromDateStr(s);
+  const label = WDAYS[d.getDay()] + ", " + MONTHS[d.getMonth()] + " " + d.getDate();
+  if (s === todayStr()) return "Today · " + label;
+  if (s === dateAddDays(todayStr(), -1)) return "Yesterday · " + label;
+  return label;
+}
+
+function sameName(a, b) { return a.trim().toLowerCase() === b.trim().toLowerCase(); }
+function pantryHasEnough(name) {
+  return state.pantry.some(p => p.enough && sameName(p.name, name));
+}
+
+function readNum(id) {
+  const el = document.getElementById(id);
+  if (!el) return 0;
+  const v = parseFloat(el.value);
+  return isFinite(v) && v >= 0 ? v : 0;
+}
+
+/* ---------- ui state ---------- */
+
+const ui = {
+  tab: "log",
+  logDate: todayStr(),
+  statsPeriod: "week",
+  statsOffset: 0,
+  orderId: null,
+  foodSearch: "",
+  am: null // add-entry modal state
+};
+
+const TABS = [
+  { id: "log", label: "Log", icon: "🍽️", title: "Food Log" },
+  { id: "stats", label: "Stats", icon: "📊", title: "Stats" },
+  { id: "foods", label: "Foods", icon: "🥕", title: "My Foods" },
+  { id: "shopping", label: "Shopping", icon: "🛒", title: "Shopping Orders" },
+  { id: "pantry", label: "Pantry", icon: "🧺", title: "Pantry" }
+];
+
+/* ---------- rendering ---------- */
+
+function render() {
+  const tab = TABS.find(t => t.id === ui.tab);
+  document.getElementById("page-title").textContent =
+    (ui.tab === "shopping" && ui.orderId) ? orderName(ui.orderId) : tab.title;
+
+  document.getElementById("tabbar").innerHTML = TABS.map(t =>
+    '<button data-action="tab" data-id="' + t.id + '" class="' + (t.id === ui.tab ? "active" : "") + '">' +
+    '<span class="ic">' + t.icon + '</span>' + t.label + '</button>'
+  ).join("");
+
+  const c = document.getElementById("content");
+  if (ui.tab === "log") c.innerHTML = renderLog();
+  else if (ui.tab === "stats") c.innerHTML = renderStats();
+  else if (ui.tab === "foods") c.innerHTML = renderFoods();
+  else if (ui.tab === "shopping") c.innerHTML = ui.orderId ? renderOrder() : renderOrders();
+  else c.innerHTML = renderPantry();
+
+  const search = document.getElementById("food-search");
+  if (search) {
+    search.addEventListener("input", () => {
+      ui.foodSearch = search.value;
+      const list = document.getElementById("food-list");
+      if (list) list.innerHTML = foodListHTML();
+    });
+  }
+  const dp = document.getElementById("log-date");
+  if (dp) dp.addEventListener("change", () => { if (dp.value) { ui.logDate = dp.value; render(); } });
+  const imp = document.getElementById("import-file");
+  if (imp) imp.addEventListener("change", handleImport);
+}
+
+/* ----- Log tab ----- */
+
+function goalBar(label, value, goal, unit, color) {
+  const pct = Math.min(100, goal > 0 ? (value / goal) * 100 : 0);
+  return '<div class="goalrow">' +
+    '<div class="lbl"><span><b>' + label + '</b></span>' +
+    '<span class="muted">' + whole(value) + " / " + whole(goal) + " " + unit + "</span></div>" +
+    '<div class="bar"><div style="width:' + pct.toFixed(1) + "%;background:var(--" + color + ')"></div></div></div>';
+}
+
+function renderLog() {
+  const entries = state.log.filter(en => en.date === ui.logDate);
+  const t = sumEntries(entries);
+  const g = state.goals;
+  let html =
+    '<div class="card"><div class="navline">' +
+    '<button class="icon-btn" data-action="log-prev">‹</button>' +
+    '<div style="text-align:center"><div class="title">' + prettyDate(ui.logDate) + '</div>' +
+    '<input type="date" id="log-date" value="' + ui.logDate + '" style="margin-top:6px;max-width:170px"></div>' +
+    '<button class="icon-btn" data-action="log-next">›</button></div>' +
+    goalBar("Calories", t.cal, g.cal, "cal", "cal") +
+    goalBar("Protein", t.p, g.p, "g", "protein") +
+    goalBar("Carbs", t.c, g.c, "g", "carbs") +
+    goalBar("Fat", t.f, g.f, "g", "fat") +
+    '<div class="row small muted" style="justify-content:space-between">' +
+    "<span>Fiber " + neat(t.fib) + "g</span><span>Sugar " + neat(t.sug) + "g</span></div></div>";
+
+  html += '<div class="card"><h2>Eaten</h2>';
+  if (entries.length === 0) {
+    html += '<div class="empty">Nothing logged yet. Tap “Add food” to record what you ate.</div>';
+  } else {
+    html += entries.map(en => {
+      const tot = entryTotal(en);
+      return '<div class="listitem"><div class="grow">' +
+        "<div><b>" + esc(en.name) + "</b>" + (en.servings !== 1 ? ' <span class="muted">×' + neat(en.servings) + "</span>" : "") + "</div>" +
+        '<div class="small muted">' + whole(tot.cal) + " cal · P " + neat(tot.p) + "g · C " + neat(tot.c) + "g · F " + neat(tot.f) + "g</div></div>" +
+        '<button class="icon-btn" data-action="del-entry" data-id="' + en.id + '">✕</button></div>';
+    }).join("");
+  }
+  html += '<button class="btn primary full" data-action="open-add-entry">＋ Add food</button></div>';
+  return html;
+}
+
+/* ----- Stats tab ----- */
+
+function periodInterval() {
+  const today = new Date();
+  if (ui.statsPeriod === "week") {
+    const start = new Date(today);
+    start.setDate(start.getDate() - start.getDay() + ui.statsOffset * 7);
+    const end = new Date(start); end.setDate(end.getDate() + 7);
+    return { start, end };
+  }
+  if (ui.statsPeriod === "month") {
+    const start = new Date(today.getFullYear(), today.getMonth() + ui.statsOffset, 1);
+    const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+    return { start, end };
+  }
+  const start = new Date(today.getFullYear() + ui.statsOffset, 0, 1);
+  const end = new Date(start.getFullYear() + 1, 0, 1);
+  return { start, end };
+}
+
+function periodLabel(iv) {
+  if (ui.statsPeriod === "week") {
+    const last = new Date(iv.end); last.setDate(last.getDate() - 1);
+    return MONTHS[iv.start.getMonth()] + " " + iv.start.getDate() + " – " + MONTHS[last.getMonth()] + " " + last.getDate();
+  }
+  if (ui.statsPeriod === "month") {
+    return ["January","February","March","April","May","June","July","August","September","October","November","December"][iv.start.getMonth()] + " " + iv.start.getFullYear();
+  }
+  return String(iv.start.getFullYear());
+}
+
+function renderStats() {
+  const iv = periodInterval();
+  const startS = toDateStr(iv.start), endS = toDateStr(iv.end);
+  const entries = state.log.filter(en => en.date >= startS && en.date < endS);
+  const t = sumEntries(entries);
+  const days = new Set(entries.map(en => en.date));
+  const loggedDays = days.size;
+  const avg = loggedDays > 0 ? scaleM(t, 1 / loggedDays) : ZERO;
+  const g = state.goals;
+
+  let html = '<div class="card">' +
+    '<div class="seg">' +
+    ["week", "month", "year"].map(p =>
+      '<button data-action="stats-period" data-id="' + p + '" class="' + (ui.statsPeriod === p ? "active" : "") + '">' +
+      p.charAt(0).toUpperCase() + p.slice(1) + "</button>").join("") +
+    "</div>" +
+    '<div class="navline" style="margin-bottom:0">' +
+    '<button class="icon-btn" data-action="stats-prev">‹</button>' +
+    '<div class="title">' + periodLabel(iv) + "</div>" +
+    '<button class="icon-btn" data-action="stats-next" ' + (ui.statsOffset >= 0 ? "disabled style='opacity:.3'" : "") + ">›</button></div></div>";
+
+  html += '<div class="card"><h2>Totals</h2><div class="statgrid">' +
+    stat(whole(t.cal), "Calories") + stat(neat(t.p) + "g", "Protein") + stat(neat(t.c) + "g", "Carbs") +
+    stat(neat(t.f) + "g", "Fat") + stat(neat(t.fib) + "g", "Fiber") + stat(neat(t.sug) + "g", "Sugar") +
+    "</div></div>";
+
+  html += '<div class="card"><h2>Daily average · ' + loggedDays + " logged day" + (loggedDays === 1 ? "" : "s") + "</h2>";
+  if (loggedDays === 0) {
+    html += '<div class="empty">No food logged in this period.</div>';
+  } else {
+    html += goalBar("Calories", avg.cal, g.cal, "cal/day", "cal") +
+      goalBar("Protein", avg.p, g.p, "g/day", "protein") +
+      goalBar("Carbs", avg.c, g.c, "g/day", "carbs") +
+      goalBar("Fat", avg.f, g.f, "g/day", "fat");
+  }
+  html += "</div>";
+
+  if (ui.statsPeriod === "week") {
+    let dayRows = "";
+    let maxCal = 1;
+    const perDay = [];
+    for (let i = 0; i < 7; i++) {
+      const ds = toDateStr(new Date(iv.start.getFullYear(), iv.start.getMonth(), iv.start.getDate() + i));
+      const cal = sumEntries(state.log.filter(en => en.date === ds)).cal;
+      perDay.push({ ds, cal });
+      if (cal > maxCal) maxCal = cal;
+    }
+    perDay.forEach(d => {
+      const pct = (d.cal / maxCal) * 100;
+      dayRows += '<div class="daybar"><span class="d">' + WDAYS[fromDateStr(d.ds).getDay()] + "</span>" +
+        '<div class="bar"><div style="width:' + pct.toFixed(1) + '%;background:var(--cal)"></div></div>' +
+        '<span class="v">' + whole(d.cal) + "</span></div>";
+    });
+    html += '<div class="card"><h2>Calories by day</h2>' + dayRows + "</div>";
+  }
+
+  html += '<div class="card"><h2>Settings</h2>' +
+    '<button class="btn full" style="margin-top:0" data-action="open-goals">🎯 Daily goals</button>' +
+    '<button class="btn full" data-action="export-data">⬇️ Export my data</button>' +
+    '<button class="btn full" data-action="pick-import">⬆️ Import a backup</button>' +
+    '<input type="file" id="import-file" accept=".json,application/json" hidden></div>';
+  return html;
+}
+
+function stat(v, l) { return '<div class="stat"><div class="v">' + v + '</div><div class="l">' + l + "</div></div>"; }
+
+/* ----- Foods tab ----- */
+
+function foodsFiltered() {
+  const q = ui.foodSearch.trim().toLowerCase();
+  const foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
+  return q ? foods.filter(f => f.name.toLowerCase().includes(q)) : foods;
+}
+
+function foodListHTML() {
+  const foods = foodsFiltered();
+  if (foods.length === 0) return '<div class="empty">No foods match. Add foods you eat often — then logging a meal takes two taps.</div>';
+  return foods.map(f =>
+    '<div class="listitem"><div class="grow" data-action="edit-food" data-id="' + f.id + '" style="cursor:pointer">' +
+    "<div><b>" + esc(f.name) + '</b> <span class="small muted">' + esc(f.serving) + "</span></div>" +
+    '<div class="small muted">' + whole(f.m.cal) + " cal · P " + neat(f.m.p) + "g · C " + neat(f.m.c) + "g · F " + neat(f.m.f) + "g</div></div>" +
+    '<button class="icon-btn" data-action="del-food" data-id="' + f.id + '">✕</button></div>'
+  ).join("");
+}
+
+function renderFoods() {
+  return '<div class="card">' +
+    '<input type="search" id="food-search" placeholder="Search foods" value="' + esc(ui.foodSearch) + '">' +
+    '<div id="food-list" style="margin-top:6px">' + foodListHTML() + "</div>" +
+    '<button class="btn primary full" data-action="new-food">＋ New food</button></div>';
+}
+
+/* ----- Shopping tab ----- */
+
+function orderName(id) { const o = state.orders.find(x => x.id === id); return o ? o.name : "Order"; }
+
+function defaultOrderName() {
+  const now = new Date();
+  const start = new Date(now); start.setDate(start.getDate() - start.getDay());
+  return "Week of " + MONTHS[start.getMonth()] + " " + start.getDate();
+}
+
+function renderOrders() {
+  let html = '<div class="card">';
+  if (state.orders.length === 0) {
+    html += '<div class="empty">Create an order for this week’s shopping. Each week gets its own list, and you can copy last week’s order to start.</div>';
+  } else {
+    html += state.orders.map(o => {
+      const toBuy = o.items.filter(i => !i.purchased && !i.skip).length;
+      const skip = o.items.filter(i => i.skip && !i.purchased).length;
+      const bought = o.items.filter(i => i.purchased).length;
+      const parts = [toBuy + " to buy"];
+      if (skip) parts.push(skip + " skipped");
+      if (bought) parts.push(bought + " purchased");
+      return '<div class="listitem"><div class="grow" data-action="open-order" data-id="' + o.id + '" style="cursor:pointer">' +
+        "<div><b>" + esc(o.name) + "</b></div>" +
+        '<div class="small muted">' + parts.join(" · ") + "</div></div>" +
+        '<button class="icon-btn" data-action="del-order" data-id="' + o.id + '">✕</button></div>';
+    }).join("");
+  }
+  html += '<button class="btn primary full" data-action="new-order">＋ New order</button></div>';
+  return html;
+}
+
+function shoppingItemRow(o, it) {
+  return '<div class="listitem">' +
+    '<button class="check ' + (it.purchased ? "on" : "") + '" data-action="toggle-purchased" data-id="' + it.id + '">✓</button>' +
+    '<div class="grow"><div class="' + (it.skip ? "strike" : "") + '"><b>' + esc(it.name) + "</b>" +
+    (it.qty ? ' <span class="small muted">' + esc(it.qty) + "</span>" : "") + "</div></div>" +
+    '<button class="pill ' + (it.skip ? "enough" : "low") + '" data-action="toggle-skip" data-id="' + it.id + '">' +
+    (it.skip ? "Need it" : "Have enough") + "</button>" +
+    '<button class="icon-btn" data-action="del-shop-item" data-id="' + it.id + '">✕</button></div>';
+}
+
+function renderOrder() {
+  const o = state.orders.find(x => x.id === ui.orderId);
+  if (!o) { ui.orderId = null; return renderOrders(); }
+  const toBuy = o.items.filter(i => !i.purchased && !i.skip);
+  const skipped = o.items.filter(i => i.skip && !i.purchased);
+  const purchased = o.items.filter(i => i.purchased);
+  const lowCount = state.pantry.filter(p => !p.enough).length;
+
+  let html = '<button class="backlink" data-action="back-orders">‹ All orders</button>';
+  html += '<div class="card"><h2>Add item</h2><div class="row">' +
+    '<input type="text" id="shop-name" placeholder="Item (e.g. Chicken breast)" class="grow">' +
+    '<input type="text" id="shop-qty" placeholder="Qty" style="width:76px">' +
+    '<button class="btn primary" data-action="add-shop-item">Add</button></div>' +
+    '<div class="hint" id="shop-hint" hidden>Your pantry says you still have enough of this — it will be added as skipped.</div></div>';
+
+  html += '<div class="card"><h2>To buy · ' + toBuy.length + "</h2>" +
+    (toBuy.length ? toBuy.map(it => shoppingItemRow(o, it)).join("") : '<div class="empty">Nothing left to buy 🎉</div>') + "</div>";
+
+  if (skipped.length) {
+    html += '<div class="card"><h2>Still have enough — skip · ' + skipped.length + "</h2>" +
+      skipped.map(it => shoppingItemRow(o, it)).join("") + "</div>";
+  }
+  if (purchased.length) {
+    html += '<div class="card"><h2>Purchased · ' + purchased.length + "</h2>" +
+      purchased.map(it => shoppingItemRow(o, it)).join("") +
+      '<button class="btn full" data-action="stock-pantry">🧺 Stock purchased items into Pantry</button></div>';
+  }
+
+  html += '<div class="card">' +
+    '<button class="btn full" style="margin-top:0" data-action="add-low-stock">Add pantry items running low' + (lowCount ? " (" + lowCount + ")" : "") + "</button>" +
+    '<button class="btn full" data-action="rename-order">✏️ Rename this order</button></div>';
+  return html;
+}
+
+/* ----- Pantry tab ----- */
+
+function renderPantry() {
+  const low = state.pantry.filter(p => !p.enough);
+  const stocked = state.pantry.filter(p => p.enough);
+
+  function rows(items) {
+    return items.map(p =>
+      '<div class="listitem"><div class="grow"><div><b>' + esc(p.name) + "</b>" +
+      (p.qty ? ' <span class="small muted">' + esc(p.qty) + "</span>" : "") + "</div></div>" +
+      '<button class="pill ' + (p.enough ? "enough" : "low") + '" data-action="toggle-pantry" data-id="' + p.id + '">' +
+      (p.enough ? "✓ Enough" : "⚠︎ Low") + "</button>" +
+      '<button class="icon-btn" data-action="del-pantry" data-id="' + p.id + '">✕</button></div>'
+    ).join("");
+  }
+
+  let html = '<div class="card">' +
+    '<div class="empty" style="padding-top:0">Foods you have at home. Anything marked “Enough” is skipped automatically when it shows up on a shopping order.</div>' +
+    '<div class="row"><input type="text" id="pantry-name" placeholder="Add food you bought" class="grow">' +
+    '<input type="text" id="pantry-qty" placeholder="Qty" style="width:76px">' +
+    '<button class="btn primary" data-action="add-pantry">Add</button></div></div>';
+
+  if (low.length) html += '<div class="card"><h2>Running low — need to buy</h2>' + rows(low) + "</div>";
+  if (stocked.length) html += '<div class="card"><h2>Stocked — no need to buy</h2>' + rows(stocked) + "</div>";
+  if (!state.pantry.length) html += '<div class="card"><div class="empty">Your pantry is empty. Add what you have at home, or check items off a shopping order and stock them here in one tap.</div></div>';
+  return html;
+}
+
+/* ---------- modal ---------- */
+
+function openModal(html) {
+  document.getElementById("modal").innerHTML = html;
+  document.getElementById("modal-root").classList.add("open");
+}
+function closeModal() {
+  document.getElementById("modal-root").classList.remove("open");
+  ui.am = null;
+}
+document.getElementById("modal-root").addEventListener("click", e => {
+  if (e.target === document.getElementById("modal-root")) closeModal();
+});
+
+function modalHead(title) {
+  return '<div class="modal-head"><h3>' + title + '</h3>' +
+    '<button class="icon-btn" data-action="close-modal">✕</button></div>';
+}
+
+/* ----- add entry modal ----- */
+
+function amFoodListHTML() {
+  const q = (ui.am.search || "").trim().toLowerCase();
+  let foods = state.foods.slice().sort((a, b) => a.name.localeCompare(b.name));
+  if (q) foods = foods.filter(f => f.name.toLowerCase().includes(q));
+  if (!foods.length) return '<div class="empty">No foods match.</div>';
+  return foods.map(f =>
+    '<button class="foodpick" data-action="am-pick" data-id="' + f.id + '">' +
+    "<span><b>" + esc(f.name) + '</b><br><span class="small muted">' + esc(f.serving) + "</span></span>" +
+    (ui.am.foodId === f.id ? '<span class="tick">✓</span>' : "") + "</button>"
+  ).join("");
+}
+
+function addEntryModalHTML() {
+  const lib = ui.am.mode === "lib";
+  let html = modalHead("Add to Log") +
+    '<div class="seg">' +
+    '<button data-action="am-mode" data-id="lib" class="' + (lib ? "active" : "") + '">My Foods</button>' +
+    '<button data-action="am-mode" data-id="quick" class="' + (lib ? "" : "active") + '">Quick Add</button></div>';
+
+  if (lib) {
+    html += '<input type="search" id="am-search" placeholder="Search foods" value="' + esc(ui.am.search || "") + '">' +
+      '<div id="am-food-list" style="max-height:38dvh;overflow-y:auto;margin-top:6px">' + amFoodListHTML() + "</div>";
+  } else {
+    html += '<div class="field"><label>What did you eat?</label>' +
+      '<input type="text" id="am-name" placeholder="e.g. Turkey sandwich" value="' + esc(ui.am.qname || "") + '"></div>' +
+      '<div class="macro-grid">' + macroInputs("am", ui.am.qm || ZERO) + "</div>";
+  }
+  html += '<div class="field" style="margin-top:12px"><label>Servings</label>' +
+    '<input type="number" id="am-servings" inputmode="decimal" step="0.25" min="0.25" value="' + (ui.am.servings || 1) + '"></div>' +
+    '<button class="btn primary full" data-action="am-save">Add to log</button>';
+  return html;
+}
+
+function macroInputs(prefix, m) {
+  const fields = [["cal", "Calories"], ["p", "Protein (g)"], ["c", "Carbs (g)"], ["f", "Fat (g)"], ["fib", "Fiber (g)"], ["sug", "Sugar (g)"]];
+  return fields.map(fd =>
+    '<div class="field"><label>' + fd[1] + '</label>' +
+    '<input type="number" id="' + prefix + "-" + fd[0] + '" inputmode="decimal" step="0.1" min="0" value="' + (m[fd[0]] || 0) + '"></div>'
+  ).join("");
+}
+
+function readMacros(prefix) {
+  return { cal: readNum(prefix + "-cal"), p: readNum(prefix + "-p"), c: readNum(prefix + "-c"),
+           f: readNum(prefix + "-f"), fib: readNum(prefix + "-fib"), sug: readNum(prefix + "-sug") };
+}
+
+function snapshotAmInputs() {
+  if (!ui.am) return;
+  const s = document.getElementById("am-servings");
+  if (s) { const v = parseFloat(s.value); if (isFinite(v) && v > 0) ui.am.servings = v; }
+  if (ui.am.mode === "quick") {
+    const n = document.getElementById("am-name");
+    if (n) ui.am.qname = n.value;
+    if (document.getElementById("am-cal")) ui.am.qm = readMacros("am");
+  } else {
+    const q = document.getElementById("am-search");
+    if (q) ui.am.search = q.value;
+  }
+}
+
+function refreshAddEntryModal() {
+  openModal(addEntryModalHTML());
+  const q = document.getElementById("am-search");
+  if (q) q.addEventListener("input", () => {
+    ui.am.search = q.value;
+    const list = document.getElementById("am-food-list");
+    if (list) list.innerHTML = amFoodListHTML();
+  });
+}
+
+/* ----- food editor modal ----- */
+
+function foodEditorHTML(f) {
+  return modalHead(f ? "Edit Food" : "New Food") +
+    (f ? '<input type="hidden" id="fe-id" value="' + f.id + '">' : "") +
+    '<div class="field"><label>Name</label><input type="text" id="fe-name" value="' + (f ? esc(f.name) : "") + '"></div>' +
+    '<div class="field"><label>Serving size</label><input type="text" id="fe-serving" placeholder="e.g. 1 cup" value="' + (f ? esc(f.serving) : "") + '"></div>' +
+    '<h2 style="font-size:13px;color:var(--muted);margin:8px 0">MACROS PER SERVING</h2>' +
+    '<div class="macro-grid">' + macroInputs("fe", f ? f.m : ZERO) + "</div>" +
+    '<button class="btn primary full" data-action="fe-save">Save food</button>';
+}
+
+/* ----- goals modal ----- */
+
+function goalsModalHTML() {
+  const g = state.goals;
+  return modalHead("Daily Goals") +
+    '<div class="macro-grid">' +
+    '<div class="field"><label>Calories</label><input type="number" id="g-cal" inputmode="numeric" min="0" value="' + g.cal + '"></div>' +
+    '<div class="field"><label>Protein (g)</label><input type="number" id="g-p" inputmode="numeric" min="0" value="' + g.p + '"></div>' +
+    '<div class="field"><label>Carbs (g)</label><input type="number" id="g-c" inputmode="numeric" min="0" value="' + g.c + '"></div>' +
+    '<div class="field"><label>Fat (g)</label><input type="number" id="g-f" inputmode="numeric" min="0" value="' + g.f + '"></div></div>' +
+    '<div class="empty">These targets drive the progress bars on the Log tab and the averages in Stats.</div>' +
+    '<button class="btn primary full" data-action="g-save">Save goals</button>';
+}
+
+/* ----- new order / rename modals ----- */
+
+function newOrderModalHTML() {
+  const latest = state.orders[0];
+  return modalHead("New Order") +
+    '<div class="empty" style="padding-top:0">Copying last week’s order re-checks your pantry: anything you still have enough of is automatically marked as skip.</div>' +
+    '<button class="btn primary full" data-action="create-order-empty">Start empty</button>' +
+    (latest ? '<button class="btn full" data-action="create-order-copy">Copy “' + esc(latest.name) + "”</button>" : "");
+}
+
+function renameModalHTML(o) {
+  return modalHead("Rename Order") +
+    '<div class="field"><input type="text" id="rn-name" value="' + esc(o.name) + '"></div>' +
+    '<button class="btn primary full" data-action="rn-save">Save</button>';
+}
+
+/* ---------- export / import ---------- */
+
+function handleImport() {
+  const inp = document.getElementById("import-file");
+  const file = inp && inp.files && inp.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const s = JSON.parse(reader.result);
+      if (!s || !Array.isArray(s.foods) || !Array.isArray(s.log)) throw new Error("bad");
+      state = s;
+      save();
+      alert("Backup imported.");
+    } catch (e) {
+      alert("That file doesn't look like a Macros & Food backup.");
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ---------- actions ---------- */
+
+const actions = {
+  "tab": id => { ui.tab = id; render(); },
+  "close-modal": () => closeModal(),
+
+  /* log */
+  "log-prev": () => { ui.logDate = dateAddDays(ui.logDate, -1); render(); },
+  "log-next": () => { ui.logDate = dateAddDays(ui.logDate, 1); render(); },
+  "del-entry": id => { state.log = state.log.filter(en => en.id !== id); save(); },
+  "open-add-entry": () => { ui.am = { mode: "lib", search: "", foodId: null, servings: 1 }; refreshAddEntryModal(); },
+  "am-mode": id => { snapshotAmInputs(); ui.am.mode = id; refreshAddEntryModal(); },
+  "am-pick": id => { snapshotAmInputs(); ui.am.foodId = (ui.am.foodId === id ? null : id); refreshAddEntryModal(); },
+  "am-save": () => {
+    snapshotAmInputs();
+    const servings = ui.am.servings || 1;
+    if (ui.am.mode === "lib") {
+      const f = state.foods.find(x => x.id === ui.am.foodId);
+      if (!f) { alert("Pick a food first (or use Quick Add)."); return; }
+      state.log.push({ id: uuid(), date: ui.logDate, name: f.name, servings, m: Object.assign({}, f.m) });
+    } else {
+      const name = (ui.am.qname || "").trim();
+      if (!name) { alert("Give it a name first."); return; }
+      state.log.push({ id: uuid(), date: ui.logDate, name, servings, m: ui.am.qm || Object.assign({}, ZERO) });
+    }
+    closeModal(); save();
+  },
+
+  /* stats */
+  "stats-period": id => { ui.statsPeriod = id; ui.statsOffset = 0; render(); },
+  "stats-prev": () => { ui.statsOffset -= 1; render(); },
+  "stats-next": () => { if (ui.statsOffset < 0) { ui.statsOffset += 1; render(); } },
+  "open-goals": () => openModal(goalsModalHTML()),
+  "g-save": () => {
+    state.goals = { cal: readNum("g-cal"), p: readNum("g-p"), c: readNum("g-c"), f: readNum("g-f") };
+    closeModal(); save();
+  },
+  "export-data": () => {
+    try {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "macros-and-food-backup.json";
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) { alert("Export isn't available here."); }
+  },
+  "pick-import": () => { const el = document.getElementById("import-file"); if (el) el.click(); },
+
+  /* foods */
+  "new-food": () => openModal(foodEditorHTML(null)),
+  "edit-food": id => { const f = state.foods.find(x => x.id === id); if (f) openModal(foodEditorHTML(f)); },
+  "del-food": id => {
+    const f = state.foods.find(x => x.id === id);
+    if (f && confirm('Delete "' + f.name + '" from your foods? (Logged meals keep their macros.)')) {
+      state.foods = state.foods.filter(x => x.id !== id); save();
+    }
+  },
+  "fe-save": () => {
+    const idEl = document.getElementById("fe-id");
+    const name = (document.getElementById("fe-name").value || "").trim();
+    if (!name) { alert("Give the food a name."); return; }
+    let serving = (document.getElementById("fe-serving").value || "").trim();
+    if (!serving) serving = "1 serving";
+    const m = readMacros("fe");
+    if (idEl) {
+      const f = state.foods.find(x => x.id === idEl.value);
+      if (f) { f.name = name; f.serving = serving; f.m = m; }
+    } else {
+      state.foods.push({ id: uuid(), name, serving, m });
+    }
+    closeModal(); save();
+  },
+
+  /* shopping */
+  "open-order": id => { ui.orderId = id; render(); },
+  "back-orders": () => { ui.orderId = null; render(); },
+  "new-order": () => openModal(newOrderModalHTML()),
+  "create-order-empty": () => {
+    const o = { id: uuid(), name: defaultOrderName(), createdAt: Date.now(), items: [] };
+    state.orders.unshift(o); ui.orderId = o.id; closeModal(); save();
+  },
+  "create-order-copy": () => {
+    const src = state.orders[0];
+    const o = { id: uuid(), name: defaultOrderName(), createdAt: Date.now(), items: [] };
+    if (src) o.items = src.items.map(it => ({
+      id: uuid(), name: it.name, qty: it.qty, purchased: false, skip: pantryHasEnough(it.name)
+    }));
+    state.orders.unshift(o); ui.orderId = o.id; closeModal(); save();
+  },
+  "del-order": id => {
+    const o = state.orders.find(x => x.id === id);
+    if (o && confirm('Delete order "' + o.name + '"?')) {
+      state.orders = state.orders.filter(x => x.id !== id);
+      if (ui.orderId === id) ui.orderId = null;
+      save();
+    }
+  },
+  "rename-order": () => { const o = state.orders.find(x => x.id === ui.orderId); if (o) openModal(renameModalHTML(o)); },
+  "rn-save": () => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    const name = (document.getElementById("rn-name").value || "").trim();
+    if (o && name) o.name = name;
+    closeModal(); save();
+  },
+  "add-shop-item": () => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    if (!o) return;
+    const name = (document.getElementById("shop-name").value || "").trim();
+    if (!name) return;
+    const qty = (document.getElementById("shop-qty").value || "").trim();
+    o.items.push({ id: uuid(), name, qty, purchased: false, skip: pantryHasEnough(name) });
+    save();
+  },
+  "del-shop-item": id => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    if (o) { o.items = o.items.filter(it => it.id !== id); save(); }
+  },
+  "toggle-purchased": id => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    const it = o && o.items.find(x => x.id === id);
+    if (it) { it.purchased = !it.purchased; if (it.purchased) it.skip = false; save(); }
+  },
+  "toggle-skip": id => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    const it = o && o.items.find(x => x.id === id);
+    if (it) { it.skip = !it.skip; if (it.skip) it.purchased = false; save(); }
+  },
+  "stock-pantry": () => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    if (!o) return;
+    o.items.filter(it => it.purchased).forEach(it => {
+      const existing = state.pantry.find(p => sameName(p.name, it.name));
+      if (existing) { existing.enough = true; if (it.qty) existing.qty = it.qty; }
+      else state.pantry.push({ id: uuid(), name: it.name, qty: it.qty, enough: true });
+    });
+    save();
+    alert("Purchased items are now stocked in your Pantry.");
+  },
+  "add-low-stock": () => {
+    const o = state.orders.find(x => x.id === ui.orderId);
+    if (!o) return;
+    let added = 0;
+    state.pantry.filter(p => !p.enough).forEach(p => {
+      if (!o.items.some(it => sameName(it.name, p.name))) {
+        o.items.push({ id: uuid(), name: p.name, qty: p.qty, purchased: false, skip: false });
+        added++;
+      }
+    });
+    save();
+    if (!added) alert("Nothing in your pantry is marked as running low.");
+  },
+
+  /* pantry */
+  "add-pantry": () => {
+    const name = (document.getElementById("pantry-name").value || "").trim();
+    if (!name) return;
+    const qty = (document.getElementById("pantry-qty").value || "").trim();
+    state.pantry.push({ id: uuid(), name, qty, enough: true });
+    state.pantry.sort((a, b) => a.name.localeCompare(b.name));
+    save();
+  },
+  "toggle-pantry": id => {
+    const p = state.pantry.find(x => x.id === id);
+    if (p) { p.enough = !p.enough; save(); }
+  },
+  "del-pantry": id => { state.pantry = state.pantry.filter(x => x.id !== id); save(); }
+};
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-action]");
+  if (!el) return;
+  const fn = actions[el.dataset.action];
+  if (fn) fn(el.dataset.id, el);
+});
+
+// Live "you already have enough" hint while typing a shopping item.
+document.addEventListener("input", e => {
+  if (e.target && e.target.id === "shop-name") {
+    const hint = document.getElementById("shop-hint");
+    if (hint) hint.hidden = !(e.target.value.trim() && pantryHasEnough(e.target.value));
+  }
+});
+
+render();
+
+// Offline support — quietly skipped where service workers aren't available.
+try {
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    navigator.serviceWorker.register("sw.js");
+  }
+} catch (e) { /* no offline support here */ }
+</script>
+</body>
+</html>
